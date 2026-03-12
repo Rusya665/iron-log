@@ -11,25 +11,25 @@ It takes a simple Python dictionary where I log my sets and reps, and turns it i
 ### Progress Tracking
 I wanted to see exactly where I stand compared to benchmarks. The charts automatically scale so you're always "zoomed in" on your current performance, but you can always see the next level (like reaching for Novice or Intermediate) as a clear target line.
 
-![Bench Press Progress](media/bp.svg)
+<img src="media/bp.svg" width="600" alt="Bench Press Progress">
 *Example: Tracking Bench Press PRs with shifting standard benchmarks.*
 
-![Squat Progress](media/squat.svg)
+<img src="media/squat.svg" width="600" alt="Squat Progress">
 *Example: Seeing the "Next Level" target line on Squat progression.*
 
 ### Reps & Consistency
 It’s not always about the heaviest weight. I track average reps to see if I'm getting more efficient, and I have a consistency chart to keep myself honest about how many days a week I'm actually showing up.
 
-![Squat Reps](media/squat_reps.svg)
+<img src="media/squat_reps.svg" width="600" alt="Squat Reps">
 *Tracking rep efficiency over time.*
 
-![Weekly Consistency](media/consistency.svg)
+<img src="media/consistency.svg" width="400" alt="Weekly Consistency">
 *A simple bar chart to track weekly training volume and frequency.*
 
 ### Body Composition
 I track more than just weight. Since the strength standards depend on how much you weigh, I log my body mass alongside measurements like waist and biceps to see the full picture.
 
-![Body Composition](media/body_composition.svg)
+<img src="media/body_composition.svg" width="600" alt="Body Composition">
 *Correlating body mass changes with physical measurements.*
 
 ---
