@@ -73,16 +73,16 @@ CHART_CONFIG = {
 
 
 class TrainingLogProcessor:
-    def __init__(self, output_path: str, exercises: List[Exercise], user_data: Dict[str, Dict[str, Log]], bodyweight_log: dict):
+    def __init__(self, output_path: str, exercises: List[Exercise], user_data: Dict[str, Dict[str, Log]], bodymass_log: dict):
         self.output_path = output_path
         self.exercises = exercises
         self.user_data = user_data
-        self.bodyweight_log = bodyweight_log
+        self.bodymass_log = bodymass_log
         self.metrics = METRICS_CONFIG
 
-        if not self.bodyweight_log:
+        if not self.bodymass_log:
             import sys
-            print("CRITICAL ERROR: 'BODYWEIGHT_LOG' in 'sessions.py' is empty.")
+            print("CRITICAL ERROR: 'BODYMASS_LOG' in 'sessions.py' is empty.")
             print("Please add at least one entry (e.g., '2025-01-01': 80.0) to track standards.")
             input("Press Enter to exit...")
             sys.exit(1)
@@ -200,7 +200,7 @@ class TrainingLogProcessor:
         definitions = [
             (
                 "Est 1RM",
-                "Estimated 1 Rep Max using Brzycki formula: Mass * (36 / (37 - Reps)). Represents the theoretical maximum weight you could lift for one rep based on the set performed. For bodyweight exercises (0 mass), this calculates 'Max Reps' instead.",
+                "Estimated 1 Rep Max using Brzycki formula: Mass * (36 / (37 - Reps)). Represents the theoretical maximum mass you could lift for one rep based on the set performed. For body mass exercises (0 mass), this calculates 'Max Reps' instead.",
             ),
             (
                 "Daily Volume",
@@ -212,7 +212,7 @@ class TrainingLogProcessor:
             ),
             (
                 "Daily Intensity",
-                "Daily Average Relative Intensity. This measures the average 'effort' of your sets relative to your daily capacity. For weighted exercises, it is (Set Mass / Daily Est 1RM). For bodyweight exercises, it is (Set Reps / Daily Max Reps). A value of 100% means every set was a max effort set. 70-85% is typical for hypertrophy training.",
+                "Daily Average Relative Intensity. This measures the average 'effort' of your sets relative to your daily capacity. For mass-based exercises, it is (Set Mass / Daily Est 1RM). For body mass exercises, it is (Set Reps / Daily Max Reps). A value of 100% means every set was a max effort set. 70-85% is typical for hypertrophy training.",
             ),
             (
                 "Weekly Consistency",
@@ -224,7 +224,7 @@ class TrainingLogProcessor:
             ),
             (
                 "Avg Mass",
-                "The average weight used across all sets for a specific exercise in a session.",
+                "The average mass used across all sets for a specific exercise in a session.",
             ),
             (
                 "Avg Reps",
@@ -263,16 +263,16 @@ class TrainingLogProcessor:
                     self.exercise_volumes[ex_id] += vol
 
                 capacity = 0
-                is_bodyweight = False
+                is_bodymass = False
                 if max(log.mass) == 0:
-                    is_bodyweight = True
+                    is_bodymass = True
                     capacity = max(log.reps)
                 else:
                     capacity = calc_brzycki(log)
 
                 if capacity > 0:
                     for r, m in zip(log.reps, log.mass):
-                        if is_bodyweight:
+                        if is_bodymass:
                             ratio = r / capacity
                         else:
                             ratio = m / capacity
@@ -311,7 +311,7 @@ class TrainingLogProcessor:
                             "Std (Eli)": "Elite"
                         }
                         level = level_map.get(m.name)
-                        val = get_exercise_standard(ex.id, date_str, self.bodyweight_log, level)
+                        val = get_exercise_standard(ex.id, date_str, self.bodymass_log, level)
                         if val == 0:
                             val = None
                     elif has_data:
@@ -356,29 +356,29 @@ class TrainingLogProcessor:
             row += 1
 
         self.ws_calculations.write(0, 6, "Date", self.style_header_sub)
-        self.ws_calculations.write(0, 7, "Weight (kg)", self.style_header_sub)
+        self.ws_calculations.write(0, 7, "Mass (kg)", self.style_header_sub)
 
         measurement_keys = set()
-        for data in self.bodyweight_log.values():
+        for data in self.bodymass_log.values():
             if isinstance(data, dict):
-                measurement_keys.update([k for k in data.keys() if k.lower() != "weight"])
+                measurement_keys.update([k for k in data.keys() if k.lower() != "mass"])
                 
         m_keys = sorted(list(measurement_keys))
         for i, k in enumerate(m_keys):
             self.ws_calculations.write(0, 8 + i, f"{k.capitalize()} (cm)", self.style_header_sub)
             
         row = 1
-        sorted_dates = sorted(self.bodyweight_log.keys())
+        sorted_dates = sorted(self.bodymass_log.keys())
         self.bw_rows = len(sorted_dates)
         self.measurement_cols = len(m_keys)
         
         for d_str in sorted_dates:
-            data = self.bodyweight_log[d_str]
-            weight = data if isinstance(data, (int, float)) else data.get("weight", None)
+            data = self.bodymass_log[d_str]
+            mass = data if isinstance(data, (int, float)) else data.get("mass", None)
             
             self.ws_calculations.write(row, 6, d_str)
-            if weight is not None:
-                self.ws_calculations.write(row, 7, weight)
+            if mass is not None:
+                self.ws_calculations.write(row, 7, mass)
                 
             if isinstance(data, dict):
                 for i, k in enumerate(m_keys):
@@ -436,7 +436,7 @@ class TrainingLogProcessor:
         chart.set_legend({"position": "bottom", "font": {"size": 9}})
         
         chart.add_series({
-            "name": "Bodyweight",
+            "name": "Body Mass",
             "categories": ["Calculations", 1, 6, self.bw_rows, 6],
             "values": ["Calculations", 1, 7, self.bw_rows, 7],
             "line": {"color": "#000000", "width": 2.5},
@@ -617,16 +617,16 @@ class TrainingLogProcessor:
         chart_pos_y = max_cursor + 5
 
         for ex in self.exercises:
-            is_bodyweight = True
+            is_bodymass = True
             for d_data in self.user_data.values():
                 if ex.id in d_data:
                     log_entry = d_data[ex.id]
                     if log_entry.mass and max(log_entry.mass) > 0:
-                        is_bodyweight = False
+                        is_bodymass = False
                         break
 
-            series_2_name = "Max Reps" if is_bodyweight else "Est 1RM"
-            y_axis_name = "Max Reps" if is_bodyweight else "Mass (kg)"
+            series_2_name = "Max Reps" if is_bodymass else "Est 1RM"
+            y_axis_name = "Max Reps" if is_bodymass else "Mass (kg)"
 
             mass_chart = self.wb.add_chart({"type": "line"})
             mass_chart.show_blanks_as("span")
@@ -733,7 +733,7 @@ class TrainingLogProcessor:
                     std_level = level_map_rev.get(m_label)
                     # Check the standard at the latest date
                     latest_date = sorted(self.user_data.keys())[-1]
-                    val = get_exercise_standard(ex.id, latest_date, self.bodyweight_log, std_level)
+                    val = get_exercise_standard(ex.id, latest_date, self.bodymass_log, std_level)
                     if val > curr_max:
                         next_std = val
                         break

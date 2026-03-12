@@ -130,11 +130,11 @@ PULL_UPS_STANDARDS_KG = {
     140: {'Beginner': 1, 'Novice': 3, 'Intermediate': 9, 'Advanced': 15, 'Elite': 21}
 }
 
-def get_exercise_standard(exercise_id: str, target_date_str: str, bodyweight_log: dict, level: str = "Intermediate") -> int:
-    if not bodyweight_log:
+def get_exercise_standard(exercise_id: str, target_date_str: str, bodymass_log: dict, level: str = "Intermediate") -> int:
+    if not bodymass_log:
         return 0
         
-    dates = sorted(bodyweight_log.keys())
+    dates = sorted(bodymass_log.keys())
     if not dates:
         return 0
         
@@ -145,14 +145,14 @@ def get_exercise_standard(exercise_id: str, target_date_str: str, bodyweight_log
         else:
             break
             
-    bw_data = bodyweight_log[applicable_date]
-    current_bw = bw_data if isinstance(bw_data, (int, float)) else bw_data.get("weight", 0)
+    bm_data = bodymass_log[applicable_date]
+    current_bm = bm_data if isinstance(bm_data, (int, float)) else bm_data.get("mass", 0)
     
-    if not current_bw:
+    if not current_bm:
         return 0
         
-    rounded_bw = int(round(current_bw / 5.0) * 5.0)
-    rounded_bw = max(50, min(rounded_bw, 140))
+    rounded_bm = int(round(current_bm / 5.0) * 5.0)
+    rounded_bm = max(50, min(rounded_bm, 140))
     
     ex_id_lower = exercise_id.lower()
     if "bench press" in ex_id_lower:
@@ -170,7 +170,7 @@ def get_exercise_standard(exercise_id: str, target_date_str: str, bodyweight_log
     else:
         return 0
         
-    if rounded_bw not in table:
+    if rounded_bm not in table:
         return 0
         
-    return table[rounded_bw].get(level, 0)
+    return table[rounded_bm].get(level, 0)

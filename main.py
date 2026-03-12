@@ -43,7 +43,7 @@ if __name__ == "__main__":
 
     # The constructor call for TrainingLogProcessor is updated to pass the config object
     # as the instruction implies changes related to stand-alone logic removal from xlsx_generator.py
-    app = TrainingLogProcessor(filename, sessions.EXERCISE_REGISTRY, sessions.USER_DATA, sessions.BODYWEIGHT_LOG)
+    app = TrainingLogProcessor(filename, sessions.EXERCISE_REGISTRY, sessions.USER_DATA, sessions.BODYMASS_LOG)
     app.write_headers()
     app.process_data(sessions.USER_DATA)
     app.write_calculations()

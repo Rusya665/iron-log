@@ -26,15 +26,15 @@ def parse_raw_text(raw_text: str) -> dict:
         
         # Heuristic for long digit strings (e.g., 501525385371)
         if len(numbers) == 1 and len(numbers[0]) > 8:
-            # Assuming 6 pairs or triplets of digits (BW, Beg, Nov, Int, Adv, Elite)
+            # Assuming 6 pairs or triplets of digits (BM, Beg, Nov, Int, Adv, Elite)
             # This is complex to automate perfectly, so we'll try to find a pattern or skip.
             # Most standards are 2-3 digits. 
             pass
 
         if len(numbers) >= 6:
             try:
-                bw = int(numbers[0])
-                parsed_data[bw] = {
+                bm = int(numbers[0])
+                parsed_data[bm] = {
                     "Beginner": int(numbers[1]),
                     "Novice": int(numbers[2]),
                     "Intermediate": int(numbers[3]),
@@ -51,9 +51,9 @@ def write_to_standards(exercise_id: str, data: dict):
     
     # Convert to Python dict string with integer keys
     dict_lines = []
-    for bw, levels in sorted(data.items()):
+    for bm, levels in sorted(data.items()):
         levels_str = ", ".join([f"'{k}': {v}" for k, v in levels.items()])
-        dict_lines.append(f"    {bw}: {{{levels_str}}}")
+        dict_lines.append(f"    {bm}: {{{levels_str}}}")
     
     formatted_dict = "{\n" + ",\n".join(dict_lines) + "\n}"
     
@@ -95,7 +95,7 @@ class StandardsParserApp(ctk.CTk):
         self.opt_ex.pack(side="left", padx=10, pady=10)
 
         # 2. Raw Text Input
-        self.lbl_hint = ctk.CTkLabel(self, text="Paste raw table data below (BW, Beg, Nov, Int, Adv, Elite):")
+        self.lbl_hint = ctk.CTkLabel(self, text="Paste raw table data below (BM, Beg, Nov, Int, Adv, Elite):")
         self.lbl_hint.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
         
         self.txt_input = ctk.CTkTextbox(self, height=300)
