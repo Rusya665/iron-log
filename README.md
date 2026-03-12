@@ -1,97 +1,151 @@
-# Iron Log 🏋️‍♂️
+# Iron Log
 
-Iron Log is a project born out of a simple need: I wanted a way to track my training that lived entirely on my machine—no subscriptions, no "smart" cloud apps that hide your data behind paywalls, just a clean Python script and my own workout logs.
-
-It takes a simple Python dictionary where I log my sets and reps, and turns it into a high-grade Excel workbook with dynamic charts. The best part? It overlays strength standards from the community that adjust automatically as my body mass changes.
-
----
+[Iron Log](https://github.com/Rusya665/iron-log) is a local, Python-based training tracking tool. It operates without subscriptions or cloud dependencies. The tool converts manual workout entries (sets, reps, and mass) from a Python dictionary into a formatted Excel workbook with dynamic charts. Strength standards are overlaid onto the charts and adjust automatically based on logged body mass.
 
 ## Visual Tour
 
-### Progress Tracking
-I wanted to see exactly where I stand compared to benchmarks. The charts automatically scale so you're always "zoomed in" on your current performance, but you can always see the next level (like reaching for Novice or Intermediate) as a clear target line.
+### Strength & Progress Tracking
 
-<img src="media/bp.svg" width="600" alt="Bench Press Progress">
-*Example: Tracking Bench Press PRs with shifting standard benchmarks.*
+Charts track your estimated maximum strength and actual mass used. The next benchmark tier (e.g., Novice, Intermediate) is displayed as a target line to keep you focused on the next goal.
 
-<img src="media/squat.svg" width="600" alt="Squat Progress">
-*Example: Seeing the "Next Level" target line on Squat progression.*
+<img src="media/overall_strength_overview.svg" width="800" alt="Overall Strength Overview">
+
+Example: A birds-eye view of all major lifts tracked against Est. 1RM.
+
+<img src="media/bench_press_max_mass.svg" width="600" alt="Bench Press Progress">
+
+Example: Tracking Bench Press PRs with shifting standard benchmarks.
+
+<img src="media/squat_max_mass.svg" width="600" alt="Squat Progress">
+
+Example: Seeing the next target line on Squat progression.
 
 ### Reps & Consistency
-It’s not always about the heaviest weight. I track average reps to see if I'm getting more efficient, and I have a consistency chart to keep myself honest about how many days a week I'm actually showing up.
 
-<img src="media/squat_reps.svg" width="600" alt="Squat Reps">
-*Tracking rep efficiency over time.*
+Focus extends beyond the heaviest mass. Average reps and rep evolution are tracked to monitor efficiency and volume. A consistency chart logs weekly training frequency.
 
-<img src="media/consistency.svg" width="400" alt="Weekly Consistency">
-*A simple bar chart to track weekly training volume and frequency.*
+<img src="media/squat_reps_evolution.svg" width="600" alt="Squat Reps">
 
-### Body Composition
-I track more than just weight. Since the strength standards depend on how much you weigh, I log my body mass alongside measurements like waist and biceps to see the full picture.
+Tracking rep efficiency and volume over time.
 
-<img src="media/body_composition.svg" width="600" alt="Body Composition">
-*Correlating body mass changes with physical measurements.*
+<img src="media/weekly_training_consistency.svg" width="400" alt="Weekly Consistency">
 
----
+A bar chart tracking weekly training frequency.
 
-## What It Actually Does
+### Body Composition & Body-Mass Exercises
 
-Iron Log processes your `sessions.py` file and builds a spreadsheet that includes:
+Additional metrics are tracked alongside body mass. Measurements such as waist and biceps are supported. The tool also handles body-mass exercises (like pull-ups) by tracking reps instead of mass.
 
-*   **A Solid Data Log**: A chronological table of your workouts, including daily volume and intensity.
-*   **Time-Scaled Charts**: The X-axis uses real dates. If you miss a week, you'll see that gap, which gives a much more honest view of your progress.
-*   **Smart Benchmarks**: For the big lifts (Squat, Bench, Deadlift, OHP, etc.), it overlays target lines from Beginner to Elite. These lines adjust based on your body mass *on that specific day*.
+<img src="media/body_composition_trends.svg" width="600" alt="Body Composition">
 
-## The Logic
+Correlating body mass changes with physical measurements.
 
-The script uses a few standard formulas to make sense of the data:
+<img src="media/pullups_max_reps.svg" width="600" alt="Pull-ups Max Reps">
 
-*   **1RM Estimation**: It uses the Brzycki formula internally to estimate your maximum strength for that day. If you're doing body-mass exercises (like pull-ups), it just tracks your max reps instead.
-*   **Target Padding**: I've tuned the charts to always show at least a 15kg range. This stops the chart from looking "flat" if your weights are consistent, giving you a better sense of perspective.
-*   **Automatic Interpolation**: Even if you only weigh yourself once a week, the tool draws smooth lines between those points so your strength benchmarks always feel connected to your current size.
+Example: Tracking progress on exercises where reps are the primary metric.
 
----
+## Features
 
-## How to use it
+*   **Data Log**: A chronological table of workouts, including daily volume and intensity.
+*   **Time-Scaled Charts**: The X-axis utilizes standard date scaling. Gaps in training are visually represented.
+*   **Dynamic Benchmarks**: Standard lifts feature target lines from Beginner to Elite. Benchmark lines adjust based on the logged body mass for the specific date.
+*   **Massive Standards Database**: Includes benchmarks for 60+ exercises automatically discovered and updated.
+*   **Intelligent Routing**: Uses fuzzy matching and synonym handling (e.g., "Overhead Press" maps to "Shoulder Press") to find the correct benchmarks regardless of naming preference.
+
+## Calculation Logic
+
+*   **1RM Estimation**: The [Brzycki formula](https://en.wikipedia.org/wiki/One-repetition_maximum) calculates estimated maximum strength. For body-mass exercises, maximum reps are tracked instead.
+*   **Target Padding**: Charts are configured to display a minimum 15kg range to prevent flat visualization during periods of consistent mass.
+*   **Automatic Interpolation**: Benchmark lines interpolate smoothly between logged body mass entries.
+
+## Execution
 
 ### 0. Setup
-First, grab the dependencies:
+
+Install dependencies:
+
 ```bash
 pip install -r requirements.txt
 ```
 
-### 1. Run it
-Just fire up the main script:
+### 1. Generation
+
+Run the primary script:
+
 ```bash
 python main.py
 ```
-The first time you run it, it'll ask you where you want to save the Excel files and where your `sessions.py` is located. It remembers these in a `config.json` file. If you ever want to change them, just run `python main.py --reconfigure`.
 
-### 2. Logging your sessions
-Your data lives in `sessions.py`. You just add entries to the dictionaries there.
+Upon initial execution, prompts will request the output directory for Excel files and the location of `sessions.py`. Paths are saved in `config.json`. To modify paths, execute:
 
-**Tracking your mass:**
+```bash
+python main.py --reconfigure
+```
+
+### 2. Session Logging
+
+Data is maintained in `sessions.py`. Dictionaries are updated manually.
+
+**Tracking mass:**
+
 ```python
 BODYMASS_LOG = {
-    "2026-03-01": 80.5, # Just the mass
-    "2026-03-08": {"mass": 81.0, "biceps": 38.0, "waist": 85.5}, # Full stats
+    "2026-03-01": 80.5, # Mass only
+    "2026-03-08": {"mass": 81.0, "biceps": 38.0, "waist": 85.5}, # Full metrics
 }
 ```
 
-**Tracking a workout:**
+**Tracking workouts:**
+
 ```python
 USER_DATA = {
     "2026-03-12": { 
         SQ: Log([5, 3, 1], [80, 90, 100]), # 3 sets: 80kg x 5, 90kg x 3, 100kg x 1
-        PU: Log([8, 7, 6], [0, 0, 0]),     # Use 0 mass for pull-ups
+        PU: Log([8, 7, 6], [0, 0, 0]),     # Use 0 mass for body-mass exercises
     },
 }
 ```
 
-### 3. Adding new exercises
-If you want to add a new lift with community standards, use the parser script. You find the table on `strengthlevel.com`, copy the raw text, and paste it into the GUI:
-```bash
-python scripts/parse_standards.py
+### 3. Registering Exercises
+
+Before you can log a new exercise, you must add it to the `EXERCISE_REGISTRY` in `sessions.py`. This ensures it appears consistently in the data log and charts.
+
+```python
+# Create a unique ID/Constant
+LP = "Leg Press"
+
+# Add it to the registry list
+EXERCISE_REGISTRY = [
+    Exercise(LP, "Leg Press"), # ID and optional display name
+    Exercise(SQ),               # Defaults to ID as name
+]
 ```
-It'll clean the data and update the `core/standards.py` file automatically.
-andards.py`.
+
+### 4. Managing Standards
+
+The project uses a massive database of exercise standards. You can manage these using the provided scripts:
+
+*   **Global Update**: To refresh the entire collection of 60+ exercises from [strengthlevel.com](https://strengthlevel.com):
+    ```bash
+    python scripts/batch_scraper.py
+    ```
+*   **Manual Entry**: To add a specific exercise via text copying (GUI):
+    ```bash
+    python scripts/parse_standards.py
+    ```
+
+## Utility Scripts
+
+Located in the `scripts/` directory, these tools assist with data and asset management:
+
+*   `batch_scraper.py`: Discovers and scrapes all available strength standards globally.
+*   `parse_standards.py`: A GUI utility for manually adding missing standards via copy-paste.
+*   `patch_svgs.py`: Ensures exported SVGs are compatible with dark-mode environments by adjusting color schemes and transparency.
+
+## Contributing
+
+Contributions are welcome! If you have suggestions for new features, benchmarks, or logic improvements, feel free to open an issue or submit a pull request.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

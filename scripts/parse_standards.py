@@ -129,12 +129,16 @@ class StandardsParserApp(ctk.CTk):
         if sessions_dir not in sys.path:
             sys.path.insert(0, sessions_dir)
         
-        # Add core to path for imports within sessions.py if needed
-        if CORE_DIR not in sys.path:
-            sys.path.append(CORE_DIR)
+        # Add project root to path so sessions.py can 'from core.models import ...'
+        root_dir = os.path.join(os.path.dirname(__file__), "..")
+        if root_dir not in sys.path:
+            sys.path.append(root_dir)
 
         try:
             import sessions
+            # Proactively reload if already imported (e.g. during multiple GUI runs)
+            import importlib
+            importlib.reload(sessions)
             return sessions.EXERCISE_REGISTRY
         except Exception as e:
             print(f"Error loading registry: {e}")
