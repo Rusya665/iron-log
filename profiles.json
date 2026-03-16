@@ -1,0 +1,17 @@
+{
+    "active_profile_index": 0,
+    "remember_last_user": true,
+    "profiles": [
+        {
+            "name": "Rustem",
+            "sessions_dir": "G:/My Drive/2025 Health",
+            "output_dir": "G:/My Drive/2025 Health\\gym",
+            "age": 0,
+            "sex": "male",
+            "mass": 0.0,
+            "show_pr": true,
+            "show_standards": false,
+            "show_milestones": true
+        }
+    ]
+}

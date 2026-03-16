@@ -5,6 +5,7 @@ from tkinter import filedialog
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
+
 def get_drive_paths():
     return [
         r"G:\My Drive\2025 Health",
@@ -13,23 +14,27 @@ def get_drive_paths():
         os.path.expanduser(r"~\My Drive\2025 Health"),
     ]
 
+
 def detect_default_drive():
     for path in get_drive_paths():
         if os.path.exists(path):
             return path
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
+
 def prompt_user_for_paths() -> dict:
     default_base = detect_default_drive()
-    
+
     # Hidden root for tkinter dialogs
     root = tk.Tk()
     root.withdraw()
-    
+
     # 1. Output Dir
     default_output = os.path.join(default_base, "gym")
     print(f"Selecting Excel output folder... [Default: {default_output}]")
-    output_dir = filedialog.askdirectory(title="Select folder for Excel files", initialdir=default_base)
+    output_dir = filedialog.askdirectory(
+        title="Select folder for Excel files", initialdir=default_base
+    )
     if not output_dir:
         output_dir = default_output
         print(f"Using default: {output_dir}")
@@ -39,7 +44,9 @@ def prompt_user_for_paths() -> dict:
     # 2. Sessions Dir
     default_sessions = default_base
     print(f"Selecting 'sessions.py' folder... [Default: {default_sessions}]")
-    sessions_dir = filedialog.askdirectory(title="Select folder containing sessions.py", initialdir=default_base)
+    sessions_dir = filedialog.askdirectory(
+        title="Select folder containing sessions.py", initialdir=default_base
+    )
     if not sessions_dir:
         sessions_dir = default_sessions
         print(f"Using default: {sessions_dir}")
@@ -51,10 +58,8 @@ def prompt_user_for_paths() -> dict:
     os.makedirs(sessions_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
 
-    return {
-        "sessions_dir": sessions_dir,
-        "output_dir": output_dir
-    }
+    return {"sessions_dir": sessions_dir, "output_dir": output_dir}
+
 
 def get_config(reconfigure: bool = False) -> dict:
     if not reconfigure and os.path.exists(CONFIG_FILE):
@@ -67,8 +72,8 @@ def get_config(reconfigure: bool = False) -> dict:
                 pass
 
     config = prompt_user_for_paths()
-    
+
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)
-        
+
     return config

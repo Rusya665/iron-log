@@ -1,36 +1,36 @@
 # Iron Log
 
-[Iron Log](https://github.com/Rusya665/iron-log) is a local, Python-based training tracking tool. It operates without subscriptions or cloud dependencies. The tool converts manual workout entries (sets, reps, and mass) from a Python dictionary into a formatted Excel workbook with dynamic charts. Strength standards are overlaid onto the charts and adjust automatically based on logged body mass.
+Iron Log is a local, Python-based training tracking tool. It operates without subscriptions or cloud dependencies. The tool converts manual workout entries (sets, reps, and mass) from a Python dictionary into a formatted Excel workbook with dynamic charts. Strength standards are overlaid onto the charts and adjust automatically based on logged body mass.
 
 ## Visual Tour
 
 ### Strength & Progress Tracking
 
-Charts track your estimated maximum strength and actual mass used. The next benchmark tier (e.g., Novice, Intermediate) is displayed as a target line to keep you focused on the next goal.
+Charts track your estimated maximum strength and actual mass used. The next benchmark tier (e.g., Novice, Intermediate) is displayed as a target line to keep you focused on the next goal. Backgrounds utilize a Plasma color palette to indicate permanent milestone achievements via 90-degree vertical wall transitions.
 
 <img src="media/overall_strength_overview.svg" width="800" alt="Overall Strength Overview">
 
-Example: A birds-eye view of all major lifts tracked against Est. 1RM.
+*Example: A birds-eye view of all major lifts tracked against Est. 1RM.*
 
 <img src="media/bench_press_max_mass.svg" width="600" alt="Bench Press Progress">
 
-Example: Tracking Bench Press PRs with shifting standard benchmarks.
+*Example: Tracking Bench Press PRs with shifting standard benchmarks.*
 
 <img src="media/squat_max_mass.svg" width="600" alt="Squat Progress">
 
-Example: Seeing the next target line on Squat progression.
+*Example: Seeing the next target line on Squat progression.*
 
 ### Reps & Consistency
 
-Focus extends beyond the heaviest mass. Average reps and rep evolution are tracked to monitor efficiency and volume. A consistency chart logs weekly training frequency.
+Focus extends beyond the heaviest mass. Average reps and rep evolution are tracked to monitor efficiency and volume. Standard deviation error bars indicate set variance. A consistency chart logs weekly training frequency.
 
 <img src="media/squat_reps_evolution.svg" width="600" alt="Squat Reps">
 
-Tracking rep efficiency and volume over time.
+*Tracking rep efficiency and volume over time.*
 
 <img src="media/weekly_training_consistency.svg" width="400" alt="Weekly Consistency">
 
-A bar chart tracking weekly training frequency.
+*A bar chart tracking weekly training frequency.*
 
 ### Body Composition & Body-Mass Exercises
 
@@ -38,25 +38,51 @@ Additional metrics are tracked alongside body mass. Measurements such as waist a
 
 <img src="media/body_composition_trends.svg" width="600" alt="Body Composition">
 
-Correlating body mass changes with physical measurements.
+*Correlating body mass changes with physical measurements.*
 
 <img src="media/pullups_max_reps.svg" width="600" alt="Pull-ups Max Reps">
 
-Example: Tracking progress on exercises where reps are the primary metric.
+*Example: Tracking progress on exercises where reps are the primary metric.*
 
 ## Features
 
-*   **Data Log**: A chronological table of workouts, including daily volume and intensity.
-*   **Time-Scaled Charts**: The X-axis utilizes standard date scaling. Gaps in training are visually represented.
-*   **Dynamic Benchmarks**: Standard lifts feature target lines from Beginner to Elite. Benchmark lines adjust based on the logged body mass for the specific date.
-*   **Massive Standards Database**: Includes benchmarks for 60+ exercises automatically discovered and updated.
-*   **Intelligent Routing**: Uses fuzzy matching and synonym handling (e.g., "Overhead Press" maps to "Shoulder Press") to find the correct benchmarks regardless of naming preference.
+- **Adaptive Strength Benchmarks**: Benchmark lines (`Beginner` to `Elite`) are not static. They dynamically recalculate for every session based on your **Sex** (configured in your profile) and your **logged Body Mass** for that specific date. This ensures your progress is always measured with absolute pound-for-pound precision.
+- **Milestone Visualization**: The chart utilizes a 95% transparent **Plasma theme** background to indicate permanent level progression. Once you reach a new strength tier, the color fills 100% of the chart height behind your data, creating a mathematical **"vertical wall"** that marks your permanent ascent. Even if your performance dips later, the color stays to show your all-time achievement.
+- **Persistent Feature Toggles**: Control your chart's complexity directly from the **Settings** menu. You can independently toggle **PRs** (Est 1RM lines), **Standards** (Benchmark lines), and **Milestones** (Colored background areas). These choices are remembered per-user.
+- **Time-Scaled Charts**: The X-axis utilizes standard date scaling with -45 degree rotated labels for maximum compactness. Training gaps are visually represented, while every calendar date is processed to ensure smooth, continuous background blocks.
+- **Auto-Zoom Scaling**: Y-axis scaling automatically clamps to include your **estimated 1RM (PR line)** with a 15% margin, ensuring your peak potential is always visible.
+
+## Recent Overhaul: Milestone backgrounds and aesthetic overhaul
+
+- **90-degree vertical wall** background transitions for milestones.
+- **Infinite height fill** via 1,000,000 baseline scaling.
+- **Permanent achievement tracking** logic for background fills.
+- **Plasma color palette** applied to milestone visualizations.
+- **95% customizable transparency** for chart backgrounds.
+- **Condensed standard level legend naming** (Beg, Nov, Int, Adv, Eli).
+- **800x450 individual chart resolution** for crystalline clarity.
+- **Auto-zoom Y-axis scaling** with 15% margin based on 1RM.
+- **X-axis date labels** rotated to -45 degrees.
+- **Standard deviation error bars** restored to mass and rep charts.
+- **Personal Records worksheet** with dynamic strength level coloring.
+- **User Profile worksheet** for biographic data context.
+- **Gap-less rendering**: All calendar dates parsed for continuous background visualization.
+- **Centralized styling variables** in the class constructor for easy tweaking.
+- **Surgical initialization order** for worksheet and chart creation.
+
+## Workbook Overview
+
+- **Progress_Charts**: The visual heart of the log. Interactive visualizations showing your performance trends layered against your personal achievements.
+- **Data_Log**: A comprehensive chronological history of every workout, featuring daily volume, relative intensity, and set consistency (Stdev).
+- **Personal_Records**: A "Hall of Fame" tracking your all-time heaviest lifts. Includes the date achieved and the corresponding strength tier, dynamically colored to match your charts.
+- **User_Profile**: Displays your biographic context, training age, and configuration settings used for standard calculations.
+- **Definitions & Calculations**: Technical transparent sheets documenting the math and strength palettes behind the reports.
 
 ## Calculation Logic
 
-*   **1RM Estimation**: The [Brzycki formula](https://en.wikipedia.org/wiki/One-repetition_maximum) calculates estimated maximum strength. For body-mass exercises, maximum reps are tracked instead.
-*   **Target Padding**: Charts are configured to display a minimum 15kg range to prevent flat visualization during periods of consistent mass.
-*   **Automatic Interpolation**: Benchmark lines interpolate smoothly between logged body mass entries.
+- **1RM Estimation**: The Brzycki formula calculates estimated maximum strength. For body-mass exercises, maximum reps are tracked instead.
+- **Target Padding**: Charts are configured to display a minimum 15kg range to prevent flat visualization during periods of consistent mass.
+- **Automatic Interpolation**: Benchmark lines interpolate smoothly between logged body mass entries to provide a realistic target slope.
 
 ## Execution
 
@@ -70,17 +96,23 @@ pip install -r requirements.txt
 
 ### 1. Generation
 
-Run the primary script:
+Launch the Iron Log dashboard:
 
 ```bash
 python main.py
 ```
 
-Upon initial execution, prompts will request the output directory for Excel files and the location of `sessions.py`. Paths are saved in `config.json`. To modify paths, execute:
+The application will open a modern GUI where you can manage your training data, configure file paths, and generate reports with a single click.
 
-```bash
-python main.py --reconfigure
-```
+<img src="media/ui_user_menu.png" width="800" alt="GUI Dashboard Overview">
+
+#### Dashboard Controls
+
+- **🚀 Generate Excel Log**: The primary action. It scans your latest `sessions.py`, calculates all metrics, layers in the benchmarks, and launches the resulting Excel file.
+- **⚡ Run Scraper**: Automatically refreshes the local database of exercise benchmarks by scraping the latest standards from *strengthlevel.com*.
+- **📚 Exercise Library**: A searchable catalog of every exercise ID supported by the scraper. Use this to find the exact "Copy ID" for your `sessions.py` entries.
+- **📝 Edit Sessions.py**: Instant access to your data file. It opens your logging script in your default text editor for quick set/mass updates.
+- **📊 View Output Folder**: Opens the directory where your generated `.xlsx` reports are stored.
 
 ### 2. Session Logging
 
@@ -106,9 +138,9 @@ USER_DATA = {
 }
 ```
 
-### 3. Registering Exercises
+### 3. Adding New Exercises
 
-Before you can log a new exercise, you must add it to the `EXERCISE_REGISTRY` in `sessions.py`. This ensures it appears consistently in the data log and charts.
+When logging a new exercise, it must be added to the `EXERCISE_REGISTRY` in `sessions.py`. This ensures appearance in the data log and charts.
 
 ```python
 # Create a unique ID/Constant
@@ -123,29 +155,21 @@ EXERCISE_REGISTRY = [
 
 ### 4. Managing Standards
 
-The project uses a massive database of exercise standards. You can manage these using the provided scripts:
+A database of exercise standards is utilized. Scripts are provided for management:
 
-*   **Global Update**: To refresh the entire collection of 60+ exercises from [strengthlevel.com](https://strengthlevel.com):
-    ```bash
-    python scripts/batch_scraper.py
-    ```
-*   **Manual Entry**: To add a specific exercise via text copying (GUI):
-    ```bash
-    python scripts/parse_standards.py
-    ```
+- **Global Update**: Refresh the collection of exercises from strengthlevel.com:
+  ```bash
+  python scripts/batch_scraper.py
+  ```
+- **Manual Entry**: Add a specific exercise via text copying (GUI):
+  ```bash
+  python scripts/parse_standards.py
+  ```
 
 ## Utility Scripts
 
-Located in the `scripts/` directory, these tools assist with data and asset management:
+Located in the `scripts/` directory:
 
-*   `batch_scraper.py`: Discovers and scrapes all available strength standards globally.
-*   `parse_standards.py`: A GUI utility for manually adding missing standards via copy-paste.
-*   `patch_svgs.py`: Ensures exported SVGs are compatible with dark-mode environments by adjusting color schemes and transparency.
-
-## Contributing
-
-Contributions are welcome! If you have suggestions for new features, benchmarks, or logic improvements, feel free to open an issue or submit a pull request.
-
-## License
-
-This project is licensed under the [MIT License](LICENSE).
+- `batch_scraper.py`: Discovers and scrapes available strength standards globally.
+- `parse_standards.py`: A GUI utility for manually adding missing standards.
+- `patch_svgs.py`: Adjusts exported SVGs for dark-mode compatibility.
