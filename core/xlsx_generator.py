@@ -144,6 +144,18 @@ class TrainingLogProcessor:
             "Elite": self.wb.add_format({"bg_color": "#f0f921", "align": "left"})
         }
 
+    def validate_data(self):
+        """Check for mismatched reps and masses in user data."""
+        for date_str, exercises in self.user_data.items():
+            for ex_id, log in exercises.items():
+                if len(log.reps) != len(log.mass):
+                    ex_name = next((e.display_name for e in self.exercises if e.id == ex_id), ex_id)
+                    raise ValueError(
+                        f"Data Error on {date_str} ({ex_name}):\n"
+                        f"Found {len(log.reps)} reps but {len(log.mass)} masses.\n"
+                        f"Each set must have both a rep count and a mass value."
+                    )
+
     def write_headers(self):
         self.ws_data.write(0, 0, "Date", self.style_header_main)
         self.ws_data.write(1, 0, "", self.style_header_main)

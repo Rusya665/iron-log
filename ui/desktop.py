@@ -339,6 +339,16 @@ class IronLogApp(ctk.CTk):
             filename = os.path.join(p.output_dir, f"Training_Log_{timestamp}.xlsx")
 
             processor = TrainingLogProcessor(filename, sessions.EXERCISE_REGISTRY, sessions.USER_DATA, sessions.BODYMASS_LOG, p.to_dict())
+            
+            # --- Data Integrity Check ---
+            try:
+                processor.validate_data()
+            except ValueError as ve:
+                self.status_label.configure(text="Generation Failed: Data Mismatch", text_color="red")
+                messagebox.showerror("Data Error", str(ve))
+                return
+            # ----------------------------
+
             processor.write_headers()
             processor.process_data(sessions.USER_DATA)
             processor.write_calculations()
@@ -352,6 +362,7 @@ class IronLogApp(ctk.CTk):
             os.startfile(filename)
         except Exception as e:
             self.status_label.configure(text=f"Error: {str(e)}", text_color="red")
+            messagebox.showerror("Unexpected Error", str(e))
 
     def run_scraper(self):
         # We'll call the script as a subprocess
