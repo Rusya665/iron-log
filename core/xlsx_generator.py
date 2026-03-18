@@ -112,7 +112,7 @@ class TrainingLogProcessor:
             ("Elite", "Eli", "#f0f921")
         ]
         self.bg_levels = [
-            ("Bg (Unt)", "#FFFFFF", 100),
+            ("Bg (Unt)", "#E8E8E8", 95),  # Light grey, near-invisible for untrained
             ("Bg (Beg)", "#0d0887", 90),
             ("Bg (Nov)", "#7e03a8", 90),
             ("Bg (Int)", "#cb4679", 90),
@@ -266,6 +266,38 @@ class TrainingLogProcessor:
         max_level_so_far = {ex.id: -1 for ex in self.exercises}
         sex = self.user_profile.get("sex", "male")
 
+        # Pre-compute each exercise's final achieved milestone level across ALL dates.
+        # This allows the background to retroactively fill the whole chart with the
+        # highest level ever achieved, rather than only showing it from the date achieved.
+        final_level = {ex.id: -1 for ex in self.exercises}
+        for ex in self.exercises:
+            for date_str_pre, day_data_pre in data.items():
+                if ex.id not in day_data_pre:
+                    continue
+                log_pre = day_data_pre[ex.id]
+                if not (log_pre.reps and log_pre.mass and sum(log_pre.reps) > 0):
+                    continue
+                is_bw_pre = max(log_pre.mass) == 0
+                cap_pre = max(log_pre.reps) if is_bw_pre else calc_brzycki(log_pre)
+                std_beg = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Beginner", sex=sex)
+                std_nov = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Novice", sex=sex)
+                std_int = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Intermediate", sex=sex)
+                std_adv = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Advanced", sex=sex)
+                std_eli = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Elite", sex=sex)
+                lv = -1
+                if std_eli > 0 and cap_pre >= std_eli:
+                    lv = 4
+                elif std_adv > 0 and cap_pre >= std_adv:
+                    lv = 3
+                elif std_int > 0 and cap_pre >= std_int:
+                    lv = 2
+                elif std_nov > 0 and cap_pre >= std_nov:
+                    lv = 1
+                elif std_beg > 0 and cap_pre >= std_beg:
+                    lv = 0
+                if lv > final_level[ex.id]:
+                    final_level[ex.id] = lv
+
         for date_str in all_dates:
             self.ws_data.write(self.row_cursor, 0, date_str, self.style_date)
             
@@ -340,7 +372,9 @@ class TrainingLogProcessor:
                     if today_level > max_level_so_far[ex.id]:
                         max_level_so_far[ex.id] = today_level
 
-                active_bg_level = LEVEL_MAP[max_level_so_far[ex.id]]
+                # Use the pre-computed final level for the background so it fills the whole chart,
+                # but still update max_level_so_far for future milestone transition tracking.
+                active_bg_level = LEVEL_MAP[final_level[ex.id]]
 
                 for m in self.metrics:
                     col_idx = self.col_map[ex.id][m.name]
@@ -656,9 +690,19 @@ class TrainingLogProcessor:
             if all_mass_vals:
                 min_mass = min(all_mass_vals)
                 max_mass = max(all_mass_vals)
-                # Ensure we have some breathing room (15%) for the PR line and benchmarks
                 y_min = max(0, int(min_mass * 0.9))
                 y_max = int(max_mass * 1.15)
+                # Also ensure the next target standard tier is visible in the chart
+                # Find the last bodymass date to get current standard values
+                sex = self.user_profile.get("sex", "male")
+                last_date = sorted(self.user_data.keys())[-1]
+                std_levels_ordered = ["Beginner", "Novice", "Intermediate", "Advanced", "Elite"]
+                for lvl_name in std_levels_ordered:
+                    std_val = get_exercise_standard(ex.id, last_date, self.bodymass_log, lvl_name, sex=sex)
+                    if std_val and std_val > max_mass:
+                        # Show the first tier above max performance with 10% margin
+                        y_max = max(y_max, int(std_val * 1.10))
+                        break
                 if y_max <= y_min:
                     y_max = y_min + 10
             else:
@@ -696,6 +740,7 @@ class TrainingLogProcessor:
 
             # 2. CREATE LINE CHART SECOND (Becomes Secondary Combined Chart)
             mass_chart = self.wb.add_chart({"type": "line"})
+            mass_chart.show_blanks_as("span")  # Connect sparse standard lines across blank dates
             
             col_mass = self.col_map[ex.id]["Avg Mass"]
             col_1rm = self.col_map[ex.id]["Est 1RM"]
@@ -710,7 +755,7 @@ class TrainingLogProcessor:
                 "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
                 "values": ["Data_Log", 2, col_mass, self.row_cursor - 1, col_mass],
                 "line": {"color": "#203764", "width": 2.25},
-                "marker": {"type": "none"},
+                "marker": {"type": "circle", "size": 5, "fill": {"color": "#203764"}, "border": {"color": "#203764"}},
                 "y_error_bars": {
                     "type": "custom",
                     "plus_values": mass_err_ref,
@@ -774,7 +819,7 @@ class TrainingLogProcessor:
                 "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
                 "values": ["Data_Log", 2, col_reps, self.row_cursor - 1, col_reps],
                 "line": {"color": "#8064A2", "width": 2},
-                "marker": {"type": "none"},
+                "marker": {"type": "circle", "size": 5, "fill": {"color": "#8064A2"}, "border": {"color": "#8064A2"}},
                 "y_error_bars": {
                     "type": "custom",
                     "plus_values": reps_err_ref,

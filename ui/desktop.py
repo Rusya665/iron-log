@@ -246,70 +246,92 @@ class IronLogApp(ctk.CTk):
 
     def show_exercise_library(self):
         from core.standards import EXERCISE_STANDARDS
-        
+
         lib_win = ctk.CTkToplevel(self)
         lib_win.title("Exercise Library")
         lib_win.geometry("600x700")
-        lib_win.after(200, lambda: lib_win.focus_get()) # Fix focus on some systems
+        lib_win.after(100, lib_win.focus_force)  # Grab focus after window settles
+        lib_win.after(100, lib_win.lift)
 
         ctk.CTkLabel(lib_win, text="Search Exercises", font=("Roboto", 18, "bold")).pack(pady=10)
-        
+
         search_var = ctk.StringVar()
         search_entry = ctk.CTkEntry(lib_win, textvariable=search_var, placeholder_text="Type to filter...")
         search_entry.pack(fill="x", padx=20, pady=5)
+        # Auto-focus the search box
+        lib_win.after(150, search_entry.focus_set)
+
+        count_label = ctk.CTkLabel(lib_win, text="", text_color="gray", font=("Roboto", 11))
+        count_label.pack()
 
         scroll_frame = ctk.CTkScrollableFrame(lib_win)
         scroll_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-        # Pre-generate library items once
-        row_widgets = []
-        for slug, info in sorted(EXERCISE_STANDARDS.items()):
-            display = info.get('name', slug)
-            
-            row = ctk.CTkFrame(scroll_frame, fg_color="transparent")
-            row.pack(fill="x", pady=2)
-            
-            lbl = ctk.CTkLabel(row, text=display, font=("Roboto", 13))
-            lbl.pack(side="left", padx=5)
-            
-            slug_lbl = ctk.CTkLabel(row, text=f"({slug})", font=("Roboto", 11), text_color="gray")
-            slug_lbl.pack(side="left", padx=5)
-            
-            def copy_to_cb(s=slug):
-                self.clipboard_clear()
-                self.clipboard_append(s)
-                self.status_label.configure(text=f"Copied '{s}' to clipboard!", text_color="green")
+        # Pre-sort library once — lightweight list of (slug, display) tuples
+        LIBRARY = sorted(
+            [(slug, info.get("name", slug)) for slug, info in EXERCISE_STANDARDS.items()],
+            key=lambda x: x[1]
+        )
+        MAX_DISPLAY = 50  # Never render more than this many rows at once
 
-            def open_link(s=slug):
-                webbrowser.open(f"https://strengthlevel.com/strength-standards/{s}")
+        def render_results(matches):
+            """Destroy all current rows, then build only the matching subset."""
+            for w in scroll_frame.winfo_children():
+                w.destroy()
+            shown = matches[:MAX_DISPLAY]
+            for slug, display in shown:
+                row = ctk.CTkFrame(scroll_frame, fg_color="transparent")
+                row.pack(fill="x", pady=2)
 
-            # Buttons Container
-            btn_frame = ctk.CTkFrame(row, fg_color="transparent")
-            btn_frame.pack(side="right")
+                ctk.CTkLabel(row, text=display, font=("Roboto", 13)).pack(side="left", padx=5)
+                ctk.CTkLabel(row, text=f"({slug})", font=("Roboto", 11), text_color="gray").pack(side="left", padx=5)
 
-            copy_btn = ctk.CTkButton(btn_frame, text="Copy ID", width=60, height=24, font=("Roboto", 10), command=copy_to_cb)
-            copy_btn.pack(side="left", padx=2)
+                btn_frame = ctk.CTkFrame(row, fg_color="transparent")
+                btn_frame.pack(side="right")
 
-            view_btn = ctk.CTkButton(btn_frame, text="View", width=50, height=24, font=("Roboto", 10), fg_color="#34495e", command=open_link)
-            view_btn.pack(side="left", padx=2)
-            
-            row_widgets.append({
-                "widget": row,
-                "search_text": (display + " " + slug).lower()
-            })
+                def copy_to_cb(s=slug):
+                    self.clipboard_clear()
+                    self.clipboard_append(s)
+                    if hasattr(self, "status_label"):
+                        self.status_label.configure(text=f"Copied '{s}' to clipboard!", text_color="green")
+
+                def open_link(s=slug):
+                    webbrowser.open(f"https://strengthlevel.com/strength-standards/{s}")
+
+                ctk.CTkButton(btn_frame, text="Copy ID", width=60, height=24,
+                              font=("Roboto", 10), command=copy_to_cb).pack(side="left", padx=2)
+                ctk.CTkButton(btn_frame, text="View", width=50, height=24,
+                              font=("Roboto", 10), fg_color="#34495e", command=open_link).pack(side="left", padx=2)
+
+            total = len(matches)
+            if total > MAX_DISPLAY:
+                count_label.configure(text=f"Showing {MAX_DISPLAY} of {total} — type to narrow results")
+            elif total == len(LIBRARY):
+                count_label.configure(text=f"{total} exercises total")
+            else:
+                count_label.configure(text=f"{total} result{'s' if total != 1 else ''}")
+
+        _debounce_id = [None]  # mutable container so the inner function can update it
 
         def update_list(*args):
-            query = search_var.get().lower().strip()
-            for item in row_widgets:
-                if not query or query in item["search_text"]:
-                    if not item["widget"].winfo_ismapped():
-                        item["widget"].pack(fill="x", pady=2)
+            # Cancel any pending search and reschedule — fires 250ms after last keypress
+            if _debounce_id[0] is not None:
+                lib_win.after_cancel(_debounce_id[0])
+
+            def do_search():
+                _debounce_id[0] = None
+                query = search_var.get().lower().strip()
+                if query:
+                    matches = [(s, d) for s, d in LIBRARY if query in s.lower() or query in d.lower()]
                 else:
-                    if item["widget"].winfo_ismapped():
-                        item["widget"].pack_forget()
+                    matches = LIBRARY
+                render_results(matches)
+
+            _debounce_id[0] = lib_win.after(250, do_search)
 
         search_var.trace_add("write", update_list)
-        update_list() 
+        render_results(LIBRARY)  # Initial render (first MAX_DISPLAY results)
+
 
     def run_log_generator(self):
         p = self.manager.get_active_profile()

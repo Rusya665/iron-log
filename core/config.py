@@ -8,10 +8,9 @@ CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
 def get_drive_paths():
     return [
-        r"G:\My Drive\2025 Health",
-        r"H:\My Drive\2025 Health",
-        os.path.expanduser(r"~\Google Drive\2025 Health"),
-        os.path.expanduser(r"~\My Drive\2025 Health"),
+        os.path.expanduser(r"~\Documents\IronLog"),
+        os.path.expanduser(r"~\Desktop\IronLog"),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data")),
     ]
 
 

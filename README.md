@@ -47,23 +47,27 @@ Additional metrics are tracked alongside body mass. Measurements such as waist a
 ## Features
 
 - **Adaptive Strength Benchmarks**: Benchmark lines (`Beginner` to `Elite`) are not static. They dynamically recalculate for every session based on your **Sex** (configured in your profile) and your **logged Body Mass** for that specific date. This ensures your progress is always measured with absolute pound-for-pound precision.
-- **Milestone Visualization**: The chart utilizes a 95% transparent **Plasma theme** background to indicate permanent level progression. Once you reach a new strength tier, the color fills 100% of the chart height behind your data, creating a mathematical **"vertical wall"** that marks your permanent ascent. Even if your performance dips later, the color stays to show your all-time achievement.
+- **Retroactive Milestone Backgrounds**: The chart background fills with the highest strength tier you have *ever* achieved — retroactively across the full date range. Once you hit Novice, the whole chart goes purple. Even for exercises with one session on record, the background is correct from day one.
 - **Persistent Feature Toggles**: Control your chart's complexity directly from the **Settings** menu. You can independently toggle **PRs** (Est 1RM lines), **Standards** (Benchmark lines), and **Milestones** (Colored background areas). These choices are remembered per-user.
-- **Time-Scaled Charts**: The X-axis utilizes standard date scaling with -45 degree rotated labels for maximum compactness. Training gaps are visually represented, while every calendar date is processed to ensure smooth, continuous background blocks.
-- **Auto-Zoom Scaling**: Y-axis scaling automatically clamps to include your **estimated 1RM (PR line)** with a 15% margin, ensuring your peak potential is always visible.
+- **Time-Scaled Charts**: The X-axis utilizes standard date scaling with -45 degree rotated labels for maximum compactness. Training gaps are visually represented, while every calendar date is processed to ensure smooth, continuous background blocks. Standard lines span across gaps — no floating dots for infrequent exercises.
+- **Auto-Zoom Scaling**: Y-axis scaling automatically clamps to include your **estimated 1RM (PR line)** with a 15% margin. If the next target standard tier is above your current best, the axis extends to show it — so you always see what you're reaching for.
+- **Data Integrity Check**: Before generating any report, Iron Log verifies that every session entry has the same number of reps and masses. If something doesn't match, it tells you exactly which date and exercise needs fixing — and refuses to generate a broken report.
+- **Multi-User Profiles**: Each user has their own profile with a configured data directory, sex, and chart preferences. Auto-login support remembers your last used profile. Profile mismatch warnings fire if your `sessions.py` owner doesn't match the active profile.
 
 ## Recent Overhaul: Milestone backgrounds and aesthetic overhaul
 
 - **90-degree vertical wall** background transitions for milestones.
 - **Infinite height fill** via 1,000,000 baseline scaling.
-- **Permanent achievement tracking** logic for background fills.
+- **Retroactive achievement tracking**: background fills from the start of the chart regardless of when the milestone was hit.
 - **Plasma color palette** applied to milestone visualizations.
 - **95% customizable transparency** for chart backgrounds.
 - **Condensed standard level legend naming** (Beg, Nov, Int, Adv, Eli).
 - **800x450 individual chart resolution** for crystalline clarity.
-- **Auto-zoom Y-axis scaling** with 15% margin based on 1RM.
+- **Auto-zoom Y-axis scaling** with 15% margin based on 1RM, extended to show the next unreached standard tier.
 - **X-axis date labels** rotated to -45 degrees.
 - **Standard deviation error bars** restored to mass and rep charts.
+- **Circle markers** on the primary Avg Mass and Avg Reps lines — all benchmarks and overlays stay clean without markers.
+- **Standard lines span gaps** — sparse exercises (few sessions) no longer show floating data points.
 - **Personal Records worksheet** with dynamic strength level coloring.
 - **User Profile worksheet** for biographic data context.
 - **Gap-less rendering**: All calendar dates parsed for continuous background visualization.
@@ -108,11 +112,18 @@ The application will open a modern GUI where you can manage your training data, 
 
 #### Dashboard Controls
 
-- **🚀 Generate Excel Log**: The primary action. It scans your latest `sessions.py`, calculates all metrics, layers in the benchmarks, and launches the resulting Excel file.
+- **🚀 Generate Excel Log**: The primary action. It scans your latest `sessions.py`, validates your data, calculates all metrics, layers in the benchmarks, and launches the resulting Excel file.
 - **⚡ Run Scraper**: Automatically refreshes the local database of exercise benchmarks by scraping the latest standards from *strengthlevel.com*.
-- **📚 Exercise Library**: A searchable catalog of every exercise ID supported by the scraper. Use this to find the exact "Copy ID" for your `sessions.py` entries.
+- **📚 Exercise Library**: A searchable catalog of every exercise ID supported by the scraper. Opens instantly, shows the first 50 exercises alphabetically with a 250ms debounce search — type to narrow results, click "Copy ID" to paste directly into `sessions.py`.
 - **📝 Edit Sessions.py**: Instant access to your data file. It opens your logging script in your default text editor for quick set/mass updates.
 - **📊 View Output Folder**: Opens the directory where your generated `.xlsx` reports are stored.
+
+#### Settings Menu
+
+- **Auto-Login**: Remember your last used profile across launches.
+- **Show PRs**: Toggle the Est 1RM dashed line on/off per-user.
+- **Show Standards**: Toggle the benchmark tier lines on/off per-user.
+- **Show Milestones**: Toggle the colored background areas on/off per-user.
 
 ### 2. Session Logging
 
