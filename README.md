@@ -88,7 +88,18 @@ Additional metrics are tracked alongside body mass. Measurements such as waist a
 - **Target Padding**: Charts are configured to display a minimum 15kg range to prevent flat visualization during periods of consistent mass.
 - **Automatic Interpolation**: Benchmark lines interpolate smoothly between logged body mass entries to provide a realistic target slope.
 
-## Execution
+## Installation
+
+The easiest way to use Iron Log is to download the standalone Windows installer:
+
+1. Go to the [Releases](https://github.com/Rusya665/iron-log/releases) page on GitHub.
+2. Download the latest `IronLog_Setup_vX.X.X.exe` file.
+3. Run the installer to install the application and create a Start Menu shortcut. 
+*(No Python installation or dependencies required!)*
+
+---
+
+## Developer Execution (Running from Source)
 
 ### 0. Setup
 
