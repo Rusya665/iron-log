@@ -1,9 +1,20 @@
 import json
 import os
+import sys
 from typing import List, Optional
 
-PROFILES_FILE = os.path.join(os.path.dirname(__file__), "..", "profiles.json")
-LEGACY_CONFIG = os.path.join(os.path.dirname(__file__), "..", "config.json")
+# Mirror the same frozen-aware path logic as config.py so that profiles.json
+# is written to %APPDATA%\IronLog\ when running as a PyInstaller exe.
+if getattr(sys, "frozen", False):
+    _app_data_dir = os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser("~")), "IronLog"
+    )
+else:
+    _app_data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+os.makedirs(_app_data_dir, exist_ok=True)
+
+PROFILES_FILE = os.path.join(_app_data_dir, "profiles.json")
+LEGACY_CONFIG = os.path.join(_app_data_dir, "config.json")
 
 
 class Profile:

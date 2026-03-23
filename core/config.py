@@ -1,9 +1,21 @@
 import json
 import os
+import sys
 import tkinter as tk
 from tkinter import filedialog
 
-CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config.json")
+# When running as a frozen PyInstaller exe, __file__ points to the temp
+# extraction dir (_MEIPASS) which is wiped on exit.  Use %APPDATA%\IronLog\
+# instead so the config persists across runs.
+if getattr(sys, "frozen", False):
+    _app_data_dir = os.path.join(
+        os.environ.get("APPDATA", os.path.expanduser("~")), "IronLog"
+    )
+else:
+    _app_data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+os.makedirs(_app_data_dir, exist_ok=True)
+
+CONFIG_FILE = os.path.join(_app_data_dir, "config.json")
 
 
 def get_drive_paths():
