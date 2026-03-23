@@ -1,6 +1,6 @@
 #define MyAppName "IronLog"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "IronLog Developer"
+#define MyAppPublisher "Rustem Nizamov"
 #define MyAppExeName "IronLog.exe"
 
 [Setup]

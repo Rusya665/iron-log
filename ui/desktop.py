@@ -9,6 +9,14 @@ from core.profile_manager import ProfileManager, Profile
 from core.xlsx_generator import TrainingLogProcessor
 from datetime import datetime
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    if getattr(sys, 'frozen', False):
+        base_path = sys._MEIPASS
+    else:
+        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    return os.path.join(base_path, relative_path)
+
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
@@ -18,6 +26,11 @@ class IronLogApp(ctk.CTk):
 
         self.title("Iron Log - Strength Tracker")
         self.geometry("900x600")
+        
+        # Set the custom window icon
+        icon_path = resource_path(os.path.join("media", "GUI", "biceps.ico"))
+        if os.path.exists(icon_path):
+            self.iconbitmap(icon_path)
 
         self.manager = ProfileManager()
         self.menu = None
@@ -46,6 +59,8 @@ class IronLogApp(ctk.CTk):
         app_dropdown = CustomDropdownMenu(widget=app_btn)
         app_dropdown.add_option(option="New Profile", command=self.show_profile_creator)
         app_dropdown.add_option(option="Switch User", command=self.show_profile_picker)
+        app_dropdown.add_separator()
+        app_dropdown.add_option(option="Open App Data Folder", command=self.open_app_data_folder)
         app_dropdown.add_separator()
         app_dropdown.add_option(option="Exit", command=self.quit)
 
@@ -407,6 +422,17 @@ class IronLogApp(ctk.CTk):
         p = self.manager.get_active_profile()
         if os.path.exists(p.output_dir):
             os.startfile(p.output_dir)
+
+    def open_app_data_folder(self):
+        """ Opens the directory where config.json and profiles.json are stored """
+        if getattr(sys, "frozen", False):
+            path = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "IronLog")
+        else:
+            path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+        
+        # Ensure it exists before opening
+        os.makedirs(path, exist_ok=True)
+        os.startfile(path)
 
 if __name__ == "__main__":
     app = IronLogApp()
