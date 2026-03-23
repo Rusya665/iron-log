@@ -32,6 +32,11 @@ jobs:
       run: |
         pyinstaller iron_log.spec
 
+    - name: Inject Version into Installer
+      run: |
+        $VERSION = '${{ github.ref_name }}'.TrimStart('v')
+        (Get-Content installer/iron_log_setup.iss) -replace '#define MyAppVersion ".*"', "#define MyAppVersion ""$VERSION""" | Set-Content installer/iron_log_setup.iss
+
     - name: Compile Inno Setup Installer
       uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
       with:
@@ -41,5 +46,6 @@ jobs:
       uses: softprops/action-gh-release@v2
       with:
         files: installer/Output/IronLog_Setup_*.exe
+        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
