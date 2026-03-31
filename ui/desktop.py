@@ -241,20 +241,25 @@ class IronLogApp(ctk.CTk):
         btn_box.pack(pady=10)
 
         # Row 1: Primary Action (Spans 2 columns)
+        # Row 1: Primary Action 1 (Spans 2 columns)
         ctk.CTkButton(btn_box, text="🚀 Generate Excel Log", height=70, font=("Roboto", 16, "bold"), 
-                       command=self.run_log_generator).grid(row=0, column=0, columnspan=2, padx=10, pady=20, sticky="ew")
+                       command=self.run_log_generator).grid(row=0, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
 
-        # Row 2: Routine tools
+        # Row 2: Primary Action 2
+        ctk.CTkButton(btn_box, text="🗓️ Plan Next 3 Days", height=70, font=("Roboto", 16, "bold"), fg_color="#8e44ad", hover_color="#9b59b6",
+                       command=self.run_plan_generator).grid(row=1, column=0, columnspan=2, padx=10, pady=5, sticky="ew")
+
+        # Row 3: Routine tools
         ctk.CTkButton(btn_box, text="⚡ Run Scraper", height=50, fg_color="orange", hover_color="#d35400",
-                       command=self.run_scraper).grid(row=1, column=0, padx=10, pady=10)
+                       command=self.run_scraper).grid(row=2, column=0, padx=10, pady=10)
         ctk.CTkButton(btn_box, text="📚 Exercise Library", height=50, fg_color="#3498db", 
-                       command=self.show_exercise_library).grid(row=1, column=1, padx=10, pady=10)
+                       command=self.show_exercise_library).grid(row=2, column=1, padx=10, pady=10)
 
-        # Row 3: Maintenance tools
+        # Row 4: Maintenance tools
         ctk.CTkButton(btn_box, text="📝 Edit Sessions.py", height=50, fg_color="#7f8c8d", 
-                       command=self.edit_sessions).grid(row=2, column=0, padx=10, pady=10)
+                       command=self.edit_sessions).grid(row=3, column=0, padx=10, pady=10)
         ctk.CTkButton(btn_box, text="📊 View Output Folder", height=50, fg_color="#34495e", 
-                       command=self.open_output).grid(row=2, column=1, padx=10, pady=10)
+                       command=self.open_output).grid(row=3, column=1, padx=10, pady=10)
 
         self.status_label = ctk.CTkLabel(main_area, text="Ready", text_color="gray")
         self.status_label.pack(side="bottom", pady=20)
@@ -400,6 +405,23 @@ class IronLogApp(ctk.CTk):
         except Exception as e:
             self.status_label.configure(text=f"Error: {str(e)}", text_color="red")
             messagebox.showerror("Unexpected Error", str(e))
+
+    def run_plan_generator(self):
+        p = self.manager.get_active_profile()
+        file_path = os.path.join(p.sessions_dir, "sessions.py")
+        if not os.path.exists(file_path):
+            messagebox.showerror("Error", f"sessions.py not found in {p.sessions_dir}")
+            return
+            
+        try:
+            from core.plan_generator import generate_next_3_days
+            days_added = generate_next_3_days(file_path)
+            days_str = ", ".join(f"Day {d}" for d in days_added)
+            messagebox.showinfo("Success", f"Generated placeholders for {days_str}.\n\nCheck your sessions.py file!")
+            self.status_label.configure(text=f"Added {days_str} successfully", text_color="green")
+        except Exception as e:
+            self.status_label.configure(text=f"Error: {str(e)}", text_color="red")
+            messagebox.showerror("Plan Generation Failed", str(e))
 
     def run_scraper(self):
         # We'll call the script as a subprocess
