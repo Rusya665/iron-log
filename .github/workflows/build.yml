@@ -28,6 +28,11 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
+    - name: Inject Version into Python code
+      run: |
+        $VERSION = '${{ github.ref_name }}'.TrimStart('v')
+        (Get-Content core/version.py) -replace '__version__ = ".*"', "__version__ = ""$VERSION""" | Set-Content core/version.py
+
     - name: Build with PyInstaller
       run: |
         pyinstaller iron_log.spec

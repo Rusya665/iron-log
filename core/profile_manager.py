@@ -59,7 +59,9 @@ class ProfileManager:
         self.profiles: List[Profile] = []
         self.active_profile_index: int = -1
         self.remember_last_user: bool = True
+        self.auto_check_updates: bool = True
         self.load_profiles()
+
 
     def load_profiles(self):
         if not os.path.exists(PROFILES_FILE):
@@ -88,6 +90,7 @@ class ProfileManager:
                 self.profiles = [Profile(**p) for p in data.get("profiles", [])]
                 self.active_profile_index = data.get("active_profile_index", -1)
                 self.remember_last_user = data.get("remember_last_user", True)
+                self.auto_check_updates = data.get("auto_check_updates", True)
         except Exception as e:
             print(f"Error loading profiles: {e}")
 
@@ -95,6 +98,7 @@ class ProfileManager:
         data = {
             "active_profile_index": self.active_profile_index,
             "remember_last_user": self.remember_last_user,
+            "auto_check_updates": self.auto_check_updates,
             "profiles": [p.to_dict() for p in self.profiles],
         }
         with open(PROFILES_FILE, "w") as f:

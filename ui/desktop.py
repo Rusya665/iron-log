@@ -5,9 +5,13 @@ import os
 import sys
 import subprocess
 import webbrowser
+import threading
+import time
 from core.profile_manager import ProfileManager, Profile
 from core.xlsx_generator import TrainingLogProcessor
 from datetime import datetime
+from core.updater import check_for_updates, download_and_install_update
+from core.version import __version__
 
 def resource_path(relative_path):
     """ Get absolute path to resource, works for dev and for PyInstaller """
@@ -36,6 +40,10 @@ class IronLogApp(ctk.CTk):
         self.menu = None
         self.init_menu()
         
+        # Start auto-update loop if enabled
+        self.update_thread_stop_event = threading.Event()
+        self.start_auto_update_loop()
+        
         self.container = ctk.CTkFrame(self)
         self.container.pack(fill="both", expand=True)
 
@@ -45,6 +53,62 @@ class IronLogApp(ctk.CTk):
             self.show_dashboard()
         else:
             self.show_profile_picker()
+
+    def start_auto_update_loop(self):
+        def loop():
+            while not self.update_thread_stop_event.is_set():
+                if self.manager.auto_check_updates:
+                    self.run_update_check(manual=False)
+                # Wait 30 minutes (1800s), checking stop_event every 5 seconds
+                for _ in range(360):
+                    if self.update_thread_stop_event.is_set():
+                        break
+                    time.sleep(5)
+        t = threading.Thread(target=loop, daemon=True)
+        t.start()
+
+    def run_update_check(self, manual=False):
+        def check():
+            if manual and hasattr(self, "status_label"):
+                self.after(0, lambda: self.status_label.configure(text="Checking for updates...", text_color="white"))
+                
+            has_update, new_version, download_url = check_for_updates(__version__)
+            if has_update:
+                self.after(0, lambda: self.prompt_update(new_version, download_url))
+            elif manual:
+                self.after(0, lambda: messagebox.showinfo("No Updates", f"You are on the latest version ({__version__})."))
+                if hasattr(self, "status_label"):
+                    self.after(0, lambda: self.status_label.configure(text="Ready", text_color="gray"))
+        threading.Thread(target=check, daemon=True).start()
+
+    def prompt_update(self, new_version, download_url):
+        msg = f"Hey, a new version (v{new_version}) is found. Do you want me to restart and update?"
+        if messagebox.askyesno("Update Available", msg):
+            self.perform_update(download_url)
+
+    def perform_update(self, download_url):
+        if getattr(self, "is_updating", False):
+            return
+        self.is_updating = True
+        
+        dl_win = ctk.CTkToplevel(self)
+        dl_win.title("Downloading Update")
+        dl_win.geometry("350x150")
+        dl_win.attributes("-topmost", True)
+        
+        lbl = ctk.CTkLabel(dl_win, text="Downloading new version...\n(This will take about a minute depending on internet speed)", font=("Roboto", 12))
+        lbl.pack(pady=40, padx=20)
+        
+        def download_process():
+            download_and_install_update(download_url)
+            
+            def exit_app():
+                self.quit()
+                self.destroy()
+                os._exit(0)
+            self.after(0, exit_app)
+            
+        threading.Thread(target=download_process, daemon=True).start()
 
     def init_menu(self):
         if self.menu:
@@ -57,6 +121,8 @@ class IronLogApp(ctk.CTk):
         # App Menu
         app_btn = self.menu.add_cascade("App")
         app_dropdown = CustomDropdownMenu(widget=app_btn)
+        app_dropdown.add_option(option="Check for Updates", command=lambda: self.run_update_check(manual=True))
+        app_dropdown.add_separator()
         app_dropdown.add_option(option="New Profile", command=self.show_profile_creator)
         app_dropdown.add_option(option="Switch User", command=self.show_profile_picker)
         app_dropdown.add_separator()
@@ -92,6 +158,9 @@ class IronLogApp(ctk.CTk):
         status = "Enabled" if self.manager.remember_last_user else "Disabled"
         settings_dropdown.add_option(option=f"Auto-Login: {status}", command=self.toggle_auto_login)
         
+        update_status = "Enabled" if self.manager.auto_check_updates else "Disabled"
+        settings_dropdown.add_option(option=f"Auto-Update: {update_status}", command=self.toggle_auto_update)
+        
         p = self.manager.get_active_profile()
         if p:
             settings_dropdown.add_separator()
@@ -109,6 +178,15 @@ class IronLogApp(ctk.CTk):
         self.init_menu() # Refresh menu to show new status
         if hasattr(self, "status_label"):
             self.status_label.configure(text=f"Auto-Login {'enabled' if self.manager.remember_last_user else 'disabled'}", text_color="gray")
+
+    def toggle_auto_update(self):
+        self.manager.auto_check_updates = not self.manager.auto_check_updates
+        self.manager.save_profiles()
+        self.init_menu()
+        if hasattr(self, "status_label"):
+            self.status_label.configure(text=f"Auto-Update {'enabled' if self.manager.auto_check_updates else 'disabled'}", text_color="gray")
+        if self.manager.auto_check_updates:
+            self.run_update_check(manual=False)
 
     def toggle_feature(self, feature_name):
         p = self.manager.get_active_profile()
