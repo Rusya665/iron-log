@@ -51,6 +51,8 @@ Additional metrics are tracked alongside body mass. Measurements such as waist a
 - **Persistent Feature Toggles**: Control your chart's complexity directly from the **Settings** menu. You can independently toggle **PRs** (Est 1RM lines), **Standards** (Benchmark lines), and **Milestones** (Colored background areas). These choices are remembered per-user.
 - **Time-Scaled Charts**: The X-axis utilizes standard date scaling with -45 degree rotated labels for maximum compactness. Training gaps are visually represented, while every calendar date is processed to ensure smooth, continuous background blocks. Standard lines span across gaps — no floating dots for infrequent exercises.
 - **Auto-Zoom Scaling**: Y-axis scaling automatically clamps to include your **estimated 1RM (PR line)** with a 15% margin. If the next target standard tier is above your current best, the axis extends to show it — so you always see what you're reaching for.
+- **Intelligent Cycle Planning**: Iron Log natively tracks your training split via `day` metadata (e.g., `day: 1`, `day: "PR"`). The built-in "Plan Next Cycle" utility automatically detects what cycle you are on, pre-fills the next block of days based on your recent history, and provides an interactive UI with [+2.5 kg] and [+2 Reps] quick-action buttons to cleanly adjust progressions before writing them to your log.
+- **Dynamic Data Structures**: Fully supports non-uniform sets/reps (e.g., `[10, 8, 6]`) instead of forcing flattened integer logic, allowing authentic records of drop sets or failure sets directly in the user log.
 - **Data Integrity Check**: Before generating any report, Iron Log verifies that every session entry has the same number of reps and masses. If something doesn't match, it tells you exactly which date and exercise needs fixing — and refuses to generate a broken report.
 - **Multi-User Profiles**: Each user has their own profile with a configured data directory, sex, and chart preferences. Auto-login support remembers your last used profile. Profile mismatch warnings fire if your `sessions.py` owner doesn't match the active profile.
 
@@ -124,6 +126,7 @@ The application will open a modern GUI where you can manage your training data, 
 #### Dashboard Controls
 
 - **🚀 Generate Excel Log**: The primary action. It scans your latest `sessions.py`, validates your data, calculates all metrics, layers in the benchmarks, and launches the resulting Excel file.
+- **📅 Plan Next Cycle**: Analyzes your recent session history to intelligently generate the upcoming training code directly to your `sessions.py`. Includes a UI dialog with quick-action progression tools.
 - **⚡ Run Scraper**: Automatically refreshes the local database of exercise benchmarks by scraping the latest standards from *strengthlevel.com*.
 - **📚 Exercise Library**: A searchable catalog of every exercise ID supported by the scraper. Opens instantly, shows the first 50 exercises alphabetically with a 250ms debounce search — type to narrow results, click "Copy ID" to paste directly into `sessions.py`.
 - **📝 Edit Sessions.py**: Instant access to your data file. It opens your logging script in your default text editor for quick set/mass updates.
@@ -154,8 +157,9 @@ BODYMASS_LOG = {
 ```python
 USER_DATA = {
     "2026-03-12": { 
-        SQ: Log([5, 3, 1], [80, 90, 100]), # 3 sets: 80kg x 5, 90kg x 3, 100kg x 1
-        PU: Log([8, 7, 6], [0, 0, 0]),     # Use 0 mass for body-mass exercises
+        "day": 1,                          # N-day cycle detection metadata
+        SQ: Log([5, 5, 5], [80, 80, 80]),  # 3 sets: 80kg x 5
+        PU: Log([10, 8, 6], [0, 0, 0]),    # Non-uniform sets for bodyweight exercises
     },
 }
 ```
