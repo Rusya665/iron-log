@@ -34,11 +34,18 @@ def run_cli(args):
 
     # Pass an empty profile dict as CLI doesn't have profile awareness yet
     app = TrainingLogProcessor(filename, sessions.EXERCISE_REGISTRY, sessions.USER_DATA, sessions.BODYMASS_LOG)
+    try:
+        app.validate_data()
+    except ValueError as ve:
+        print(f"Data Error: {ve}")
+        sys.exit(1)
     app.write_headers()
     app.process_data(sessions.USER_DATA)
     app.write_calculations()
     app.generate_charts()
     app.write_definitions()
+    app.write_personal_records()
+    app.write_user_profile()
     app.save()
     
     if sys.platform == "win32":

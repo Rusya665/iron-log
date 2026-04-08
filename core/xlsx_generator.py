@@ -148,6 +148,8 @@ class TrainingLogProcessor:
         """Check for mismatched reps and masses in user data."""
         for date_str, exercises in self.user_data.items():
             for ex_id, log in exercises.items():
+                if not isinstance(log, Log):    # skip Day and any future metadata
+                    continue
                 if len(log.reps) != len(log.mass):
                     ex_name = next((e.display_name for e in self.exercises if e.id == ex_id), ex_id)
                     raise ValueError(
@@ -155,6 +157,13 @@ class TrainingLogProcessor:
                         f"Found {len(log.reps)} reps but {len(log.mass)} masses.\n"
                         f"Each set must have both a rep count and a mass value."
                     )
+
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _get_session_day(day_data: dict):
+        """Return the raw day value (int or str) from a session dict, or None."""
+        val = day_data.get("day")
+        return val if isinstance(val, (int, str)) else None
 
     def write_headers(self):
         self.ws_data.write(0, 0, "Date", self.style_header_main)
@@ -315,6 +324,8 @@ class TrainingLogProcessor:
                 intensity_ratios = []
 
                 for ex_id, log in day_data.items():
+                    if not isinstance(log, Log):   # skip Day metadata
+                        continue
                     if not (log.reps and log.mass):
                         continue
 
@@ -460,50 +471,102 @@ class TrainingLogProcessor:
                         self.ws_calculations.write(row, 8 + i, val)
             row += 1
 
+        # Training Day log — cols P, Q (indices 15, 16)
+        td_col_date = 15
+        td_col_day  = 16
+        self.ws_calculations.write(0, td_col_date, "Date", self.style_header_sub)
+        self.ws_calculations.write(0, td_col_day,  "Training Day", self.style_header_sub)
+        self.ws_calculations.set_column(td_col_date, td_col_date, 12)
+        self.ws_calculations.set_column(td_col_day,  td_col_day,  13)
+
+        td_row = 1
+        self.td_rows = 0          # integer-day sessions (for chart)
+        self.pr_rows_range = []   # (row_idx,) for PR sessions
+
+        for d_str in sorted(self.user_data.keys()):
+            session_day = self._get_session_day(self.user_data[d_str])
+            if session_day is None:
+                continue
+            self.ws_calculations.write(td_row, td_col_date, d_str)
+            self.ws_calculations.write(td_row, td_col_day, session_day)
+            if isinstance(session_day, int):
+                self.td_rows += 1
+            td_row += 1
+        self.td_total_rows = td_row - 1   # total rows written in training-day table
+
+
     def write_personal_records(self):
-        self.ws_personal_records.set_column(0, 0, 25)
-        self.ws_personal_records.set_column(1, 3, 15)
-        self.ws_personal_records.write(0, 0, "Exercise", self.style_header_main)
-        self.ws_personal_records.write(0, 1, "PR Mass (kg)", self.style_header_main)
-        self.ws_personal_records.write(0, 2, "Date Achieved", self.style_header_main)
-        self.ws_personal_records.write(0, 3, "Strength Level", self.style_header_main)
-        row = 1
-        
-        for ex in self.exercises:
-            max_mass = 0
-            pr_date = None
-            for date_str, day_data in self.user_data.items():
-                if ex.id in day_data:
+        """Two side-by-side tables: Training PRs (left) and PR-session bests (right)."""
+        from core.standards import get_exercise_standard
+
+        def _find_pr(exercises, filter_fn):
+            """Return {ex_id: (max_mass, date)} filtered by filter_fn(session_day)."""
+            result = {}
+            for ex in exercises:
+                max_mass = 0
+                pr_date = None
+                for date_str, day_data in self.user_data.items():
+                    if ex.id not in day_data:
+                        continue
+                    session_day = self._get_session_day(day_data)
+                    if not filter_fn(session_day):
+                        continue
                     log = day_data[ex.id]
-                    if log.mass:
-                        current_max = max(log.mass)
-                        if current_max > max_mass:
-                            max_mass = current_max
-                            pr_date = date_str
-            
-            if pr_date:
+                    if not isinstance(log, Log) or not log.mass:
+                        continue
+                    current_max = max(log.mass)
+                    if current_max > max_mass:
+                        max_mass = current_max
+                        pr_date = date_str
+                if pr_date:
+                    result[ex.id] = (max_mass, pr_date)
+            return result
+
+        # Training PRs: Day(int) sessions OR sessions with no day metadata (legacy)
+        training_prs = _find_pr(
+            self.exercises,
+            lambda d: d is None or isinstance(d, int)
+        )
+        # PR-session bests: only sessions where day value is the string "PR"
+        pr_session_bests = _find_pr(
+            self.exercises,
+            lambda d: isinstance(d, str) and d.upper() == "PR"
+        )
+
+        def _write_table(ws, col_offset, title, prs_dict):
+            ws.set_column(col_offset,     col_offset,     25)
+            ws.set_column(col_offset + 1, col_offset + 1, 14)
+            ws.set_column(col_offset + 2, col_offset + 2, 14)
+            ws.set_column(col_offset + 3, col_offset + 3, 16)
+            ws.write(0, col_offset,     title,           self.style_header_main)
+            ws.write(0, col_offset + 1, "PR Mass (kg)",  self.style_header_main)
+            ws.write(0, col_offset + 2, "Date Achieved", self.style_header_main)
+            ws.write(0, col_offset + 3, "Strength Level",self.style_header_main)
+            row = 1
+            for ex in self.exercises:
+                if ex.id not in prs_dict:
+                    continue
+                max_mass, pr_date = prs_dict[ex.id]
                 levels_to_check = [lvl[0] for lvl in reversed(self.levels)]
                 reached_level = "Untrained"
-                
                 for level in levels_to_check:
                     std_val = get_exercise_standard(
-                        ex.id, 
-                        pr_date, 
-                        self.bodymass_log, 
-                        level, 
+                        ex.id, pr_date, self.bodymass_log, level,
                         sex=self.user_profile.get("sex")
                     )
                     if std_val > 0 and max_mass >= std_val:
                         reached_level = level
                         break
-                
-                self.ws_personal_records.write(row, 0, ex.display_name)
-                self.ws_personal_records.write(row, 1, max_mass)
-                self.ws_personal_records.write(row, 2, pr_date)
-                
+                ws.write(row, col_offset,     ex.display_name)
+                ws.write(row, col_offset + 1, max_mass)
+                ws.write(row, col_offset + 2, pr_date)
                 style = self.level_styles.get(reached_level, self.style_def_text)
-                self.ws_personal_records.write(row, 3, reached_level, style)
+                ws.write(row, col_offset + 3, reached_level, style)
                 row += 1
+
+        _write_table(self.ws_personal_records, 0,  "Training PRs",   training_prs)
+        _write_table(self.ws_personal_records, 5,  "PR Session Bests", pr_session_bests)
+
 
     def _create_summary_chart(self, metric_key: str, chart_title: str, y_axis_label: str, cell_position: str):
         width = CHART_CONFIG["summary"]["width"]
@@ -665,6 +728,25 @@ class TrainingLogProcessor:
         max_cursor = max(cursor_left, cursor_right)
         max_cursor = max(max_cursor, target_row + self._pixels_to_rows(h_summary) + 1)
         chart_pos_y = max_cursor + 5
+
+        # Training Day pattern chart (only if Day data exists)
+        if getattr(self, "td_total_rows", 0) > 0:
+            td_chart = self.wb.add_chart({"type": "scatter", "subtype": "straight_with_markers"})
+            td_chart.set_title({"name": "Training Day Pattern"})
+            td_chart.set_size({"width": CHART_CONFIG["summary"]["width"],
+                               "height": CHART_CONFIG["column"]["height"]})
+            td_chart.set_x_axis({"date_axis": True, "name": "Date"})
+            td_chart.set_y_axis({"name": "Day", "major_gridlines": {"visible": True}, "min": 0})
+            td_chart.add_series({
+                "name": "Training Day",
+                "categories": ["Calculations", 1, 15, self.td_total_rows, 15],
+                "values":     ["Calculations", 1, 16, self.td_total_rows, 16],
+                "marker": {"type": "circle", "size": 6,
+                            "fill": {"color": "#1565C0"}, "border": {"color": "#1565C0"}},
+                "line": {"color": "#90CAF9", "width": 1.5},
+            })
+            self.ws_charts.insert_chart(f"{right_col_letter}{cursor_right + 1}", td_chart)
+            cursor_right += self._pixels_to_rows(CHART_CONFIG["column"]["height"]) + 2
 
         for ex in self.exercises:
             # We must calculate Y-axis max early so we can strictly bind the primary axis.
@@ -883,8 +965,10 @@ class TrainingLogProcessor:
             self.ws_user_profile.write(i, 1, value, self.style_def_text)
 
     def save(self):
-        self.write_personal_records()
-        self.write_user_profile()
+        """Close and write the workbook to disk.
+        NOTE: write_personal_records() and write_user_profile() must be called
+        by the caller BEFORE calling save().
+        """
         try:
             self.wb.close()
             print(f"Log generated: {self.output_path}")
