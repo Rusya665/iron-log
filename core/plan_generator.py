@@ -6,6 +6,7 @@ detect_cycle(user_data)         -> (N, last_day) | (None, None)
 days_to_generate(N, last_day)   -> list[int]
 build_planned_sessions(path, day_numbers) -> list[PlannedSession]
 write_planned_sessions(path, sessions)
+create_initial_sessions_py(path, owner_name, sex, sessions)
 """
 
 import re
@@ -296,22 +297,77 @@ def write_planned_sessions(
     sessions_file_path: str, planned: List[PlannedSession]
 ) -> None:
     """Inject the confirmed planned sessions into sessions.py.
-
-    Format written
-    --------------
-        "YYYY-MM-DD": {  # Day N
-            day: Day(N),
-            squat: Log([6, 6, 6], [95.0, 95.0, 95.0]),  #
-            dead_lift: Log([6, 6, 6], [112.5, 112.5, 112.5]),  # "felt strong"
-        },
+    
+    If any exercise variable is missing from the file entirely, it will automatically
+    define the variable and insert it into EXERCISE_REGISTRY.
     """
+    import os
     with open(sessions_file_path, "r", encoding="utf-8") as f:
-        lines = f.read().splitlines()
+        file_content = f.read()
+        lines = file_content.splitlines()
+
+    # Collect missing exercises
+    missing_exercises = []
+    seen = set()
+    for ps in planned:
+        for ex in ps.exercises:
+            if ex.var_name not in seen:
+                seen.add(ex.var_name)
+                # Quick check if it's defined anywhere in the file as `var_name = ...` or `var_name:`
+                if not re.search(fr"\b{ex.var_name}\b", file_content):
+                    missing_exercises.append(ex.var_name)
+
+    # If missing, we inject definitions just before USER_DATA
+    if missing_exercises:
+        user_data_start = next(
+            (i for i, l in enumerate(lines) if l.startswith("USER_DATA")), -1
+        )
+        if user_data_start != -1:
+            defs = []
+            has_header = any("# Automatically added exercises:" in line for line in lines)
+            if not has_header:
+                defs.append("# Automatically added exercises:")
+                
+            for mx in missing_exercises:
+                slug = re.sub(r'\W+', '_', mx.lower()).strip('_')
+                if not slug: slug = "exercise"
+                if slug[0].isdigit(): slug = "_" + slug
+                defs.append(f'{slug} = "{slug}"')
+                
+            if not has_header:
+                defs.append("")
+            
+            # Now insert into EXERCISE_REGISTRY
+            reg_end = next(
+                (i for i in range(user_data_start - 1, -1, -1) if "]" in lines[i]), -1
+            )
+            if reg_end != -1:
+                for mx in missing_exercises:
+                    slug = re.sub(r'\W+', '_', mx.lower()).strip('_')
+                    if not slug: slug = "exercise"
+                    if slug[0].isdigit(): slug = "_" + slug
+                    lines.insert(reg_end, f"    Exercise({slug}),")
+                
+                # Insert the constants before EXERCISE_REGISTRY
+                reg_start = next(
+                    (i for i in range(reg_end, -1, -1) if lines[i].startswith("EXERCISE_REGISTRY")), -1
+                )
+                if reg_start != -1:
+                    lines[reg_start:reg_start] = defs
+            else:
+                lines[user_data_start:user_data_start] = defs
+
+        # Rewrite we need file_content updated to re-format the lines
+        # we will just continue using `lines` object
 
     injection_lines: List[str] = []
     for ps in planned:
         reps_mass_comment = []
         for ex in ps.exercises:
+            # Recompute slug if we had space
+            slug = re.sub(r'\W+', '_', ex.var_name.lower()).strip('_')
+            if not slug: slug = "exercise"
+            if slug[0].isdigit(): slug = "_" + slug
             r_str = (
                 ex.reps
                 if "," in str(ex.reps)
@@ -324,7 +380,7 @@ def write_planned_sessions(
             )
             comment_part = f"  # {ex.comment}" if ex.comment.strip() else "  #"
             reps_mass_comment.append(
-                f"        {ex.var_name}: Log([{r_str}], [{m_str}]),{comment_part}"
+                f"        {slug}: Log([{r_str}], [{m_str}]),{comment_part}"
             )
 
         injection_lines.append("")
@@ -333,7 +389,7 @@ def write_planned_sessions(
         injection_lines.extend(reps_mass_comment)
         injection_lines.append("    },")
 
-    # Find USER_DATA closing brace (bare `}` at col 0)
+    # Proceed to find USER_DATA closing
     user_data_start = next(
         (i for i, l in enumerate(lines) if l.startswith("USER_DATA = {")), -1
     )
@@ -352,3 +408,77 @@ def write_planned_sessions(
 
     with open(sessions_file_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+
+
+def create_initial_sessions_py(
+    sessions_file_path: str,
+    owner_name: str,
+    sex: str,
+    planned: List[PlannedSession]
+) -> None:
+    """Create a completely new sessions.py file for a new user with the first cycle."""
+    import os
+    
+    lines = [
+        "from core.models import Exercise, Log",
+        "from core.standards import *",
+        "",
+        f'SESSIONS_OWNER = "{owner_name}"',
+        f'USER_SEX = "{sex}"',
+        "",
+        "BODYMASS_LOG = {",
+        "}",
+        "",
+        "day = 'day'",
+        "",
+        "# Dynamically imported exercises:",
+    ]
+    
+    # Collect unique exercises across all planned sessions
+    exercises = []
+    exercise_ids = set()
+    for ps in planned:
+        for ex in ps.exercises:
+            slug = re.sub(r'\W+', '_', ex.var_name.lower()).strip('_')
+            if not slug: slug = "exercise"
+            if slug[0].isdigit(): slug = "_" + slug
+            
+            if slug not in exercise_ids:
+                exercises.append(slug)
+                exercise_ids.add(slug)
+    
+    # Write constants for them (assuming default to slug format uppercase or just string)
+    for ex in exercises:
+        lines.append(f'{ex} = "{ex}"')
+        
+    lines.append("")
+    lines.append("EXERCISE_REGISTRY = [")
+    for ex in exercises:
+        lines.append(f"    Exercise({ex}),")
+    lines.append("]")
+    lines.append("")
+    
+    lines.append("USER_DATA = {")
+    
+    # Write the planned sessions
+    from datetime import datetime
+    for ps in planned:
+        lines.append(f'    "{ps.date_str}": {{  # Day {ps.day_number}')
+        lines.append(f"        day: {ps.day_number},")
+        for ex in ps.exercises:
+            slug = re.sub(r'\W+', '_', ex.var_name.lower()).strip('_')
+            if not slug: slug = "exercise"
+            if slug[0].isdigit(): slug = "_" + slug
+            
+            r_str = ex.reps if "," in str(ex.reps) else ", ".join(str(ex.reps) for _ in range(ex.sets))
+            m_str = ex.mass if "," in str(ex.mass) else ", ".join(str(ex.mass) for _ in range(ex.sets))
+            comment = f"  # {ex.comment}" if ex.comment.strip() else "  #"
+            lines.append(f"        {slug}: Log([{r_str}], [{m_str}]),{comment}")
+        lines.append("    },")
+    
+    lines.append("}")
+    
+    os.makedirs(os.path.dirname(os.path.abspath(sessions_file_path)), exist_ok=True)
+    with open(sessions_file_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+

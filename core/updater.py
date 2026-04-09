@@ -72,8 +72,17 @@ del "%~f0"
             f.write(bat_content)
 
         # 3. Launch the batch script detached, without a console window
+        # Strip PyInstaller environment variables so the restarted app
+        # doesn't try to load DLLs from the old, deleted temp directory.
+        env = os.environ.copy()
+        keys_to_remove = [
+            k for k in env if k.upper().startswith("_PYI_") or k.upper().startswith("_MEI")
+        ]
+        for k in keys_to_remove:
+            env.pop(k)
+            
         # CREATE_NO_WINDOW = 0x08000000
-        subprocess.Popen([bat_path], creationflags=0x08000000)
+        subprocess.Popen([bat_path], creationflags=0x08000000, env=env)
         
     except Exception as e:
         print(f"Error downloading or installing update: {e}")

@@ -472,12 +472,21 @@ class IronLogApp(ctk.CTk):
             sessions_file = os.path.join(s_dir, "sessions.py")
             if not os.path.exists(sessions_file):
                 validation_label.configure(
-                    text="⚠️  sessions.py not found in that folder — generation will fail until it exists."
+                    text="⚠️  sessions.py not found in that folder!"
                 )
-                if not messagebox.askyesno(
+                if messagebox.askyesno(
                     "sessions.py Not Found",
-                    f"sessions.py was not found in:\n{s_dir}\n\nSave profile anyway?",
+                    f"sessions.py was not found in:\n{s_dir}\n\nDo you want to initialize it with a new split now?",
                 ):
+                    new_p = Profile(
+                        name=name,
+                        sessions_dir=s_dir,
+                        output_dir=os.path.join(s_dir, "gym"),
+                        sex=sex_var.get(),
+                    )
+                    self._launch_initial_split_builder(new_p, sessions_file, is_edit, profile_index)
+                    return
+                elif not messagebox.askyesno("Save anyway", "Save profile anyway without sessions.py?"):
                     return
 
             new_p = Profile(
@@ -504,6 +513,16 @@ class IronLogApp(ctk.CTk):
         if self.manager.profiles:
             cancel_cmd = self.show_dashboard if is_edit else self.show_profile_picker
             ctk.CTkButton(self.container, text="Cancel", command=cancel_cmd).pack()
+
+    def _launch_initial_split_builder(self, p, sessions_file, is_edit, profile_index):
+        dialog = DynamicPlanDialog(
+            self, sessions_file, p, 
+            title="Create Initial Split",
+            mode="initial",
+            profile_is_edit=is_edit,
+            profile_index=profile_index
+        )
+        self.wait_window(dialog)
 
     def select_profile(self, index):
         self.manager.set_active(index)
@@ -1070,12 +1089,13 @@ class IronLogApp(ctk.CTk):
             last_day_obj = v if isinstance(v, (int, str)) else None
 
         if isinstance(last_day_obj, str):
-            # State 2: string day ("PR", "small PR", etc.) — planning blocked
-            messagebox.showinfo(
-                "Planning Paused",
+            # State 2: string day ("PR", "small PR", etc.) — prompt to configure a new cycle
+            if messagebox.askyesno(
+                "New Cycle",
                 f"Last session was a '{last_day_obj}' session.\n"
-                "Start your next training day manually before planning ahead.",
-            )
+                "Would you like to build a new N-Day cycle now?"
+            ):
+                self._launch_post_pr_builder(p, file_path)
             return
 
         N, last_day_int = detect_cycle(user_data)
@@ -1097,7 +1117,7 @@ class IronLogApp(ctk.CTk):
             )
             return
 
-        # State 1: show the preview dialog
+        # State 1: normal cycle planning mode
         try:
             from core.plan_generator import build_planned_sessions
 
@@ -1112,7 +1132,12 @@ class IronLogApp(ctk.CTk):
             days_str = ", ".join(f"Day {d}" for d in day_nums)
             why = f"Completing cycle of {N} — generating {days_str}"
 
-        dialog = PlanPreviewDialog(self, planned, why, file_path)
+        dialog = DynamicPlanDialog(
+            self, file_path, p,
+            start_planned=planned,
+            title=f"Plan Next Cycle ({why})",
+            mode="normal"
+        )
         self.wait_window(dialog)
 
         if dialog.confirmed:
@@ -1121,6 +1146,29 @@ class IronLogApp(ctk.CTk):
             self.set_status(
                 f"✅ Added {len(planned)} session(s)", "#4caf50", auto_reset_ms=5000
             )
+
+    def _launch_post_pr_builder(self, p, sessions_file):
+        from core.plan_generator import detect_cycle, build_planned_sessions
+        sess = self._try_load_sessions(p)
+        if sess is None:
+            return
+            
+        N, last_day_int = detect_cycle(sess.USER_DATA)
+        if N is None: 
+            N = 3
+        days_to_plan = list(range(1, N + 1))
+        try:
+            planned = build_planned_sessions(sessions_file, days_to_plan)
+        except Exception:
+            planned = None
+            
+        dialog = DynamicPlanDialog(
+            self, sessions_file, p, 
+            start_planned=planned,
+            title="Configure New Split",
+            mode="post_pr"
+        )
+        self.wait_window(dialog)
 
     # -------------------------------------------------------------------------
     # Experimental features
@@ -1266,9 +1314,6 @@ class IronLogApp(ctk.CTk):
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()  # preserve line endings
 
-        # Find BODYMASS_LOG's closing brace by looking for a bare '}' line
-        # at column 0 after the opening line — more robust than character counting
-        # since comments inside the block can contain { } characters.
         start_line = next(
             (i for i, ln in enumerate(lines) if ln.startswith("BODYMASS_LOG = {")), -1
         )
@@ -1501,248 +1546,444 @@ class IronLogApp(ctk.CTk):
 
 
 # =============================================================================
-# Plan Preview Dialog
+# Dynamic Plan Dialog
 # =============================================================================
 
 
-class PlanPreviewDialog(ctk.CTkToplevel):
-    """Editable preview of planned sessions before writing to sessions.py."""
+class DynamicPlanDialog(ctk.CTkToplevel):
+    """Dynamically build an N-Day split from scratch or edit a generated cycle layout."""
 
-    def __init__(self, parent, planned, why: str, file_path: str):
+    def __init__(
+        self, parent, file_path: str, profile,
+        start_planned=None, title="Split Builder", mode="initial",
+        profile_is_edit=False, profile_index=None
+    ):
         super().__init__(parent)
-        self.title("Plan Next Cycle")
-        self.geometry("820x600")
-        self.minsize(1200, 450)
-        self.grab_set()  # modal
+        self.title(title)
+        self.geometry("980x700")
+        self.minsize(980, 500)
+        self.grab_set()
+        
         self.confirmed = False
-        self._planned = planned
+
+        self._parent_app = parent
         self._file_path = file_path
-        self._widgets: list = []  # (session_idx, ex_idx, sets_var, reps_var, mass_var, comment_var)
-        self._date_vars: list = []  # one StringVar per session
+        self._profile = profile
+        self._mode = mode  # 'initial', 'post_pr', 'normal'
+        self._profile_is_edit = profile_is_edit
+        self._profile_index = profile_index
 
-        self._build(why)
+        import copy
+        from core.plan_generator import PlannedSession
+        # Default to 3 days if completely empty
+        if start_planned:
+            self._planned = copy.deepcopy(start_planned)
+        else:
+            base_date = datetime.now().strftime("%Y-%m-%d")
+            self._planned = [
+                PlannedSession(day_number=1, date_str=base_date, exercises=[]),
+                PlannedSession(day_number=2, date_str=base_date, exercises=[]),
+                PlannedSession(day_number=3, date_str=base_date, exercises=[]),
+            ]
+            
+        self._widgets = []
+        self._date_vars = []
+        
+        self._main_container = ctk.CTkFrame(self, fg_color="transparent")
+        self._main_container.pack(fill="both", expand=True)
+        
+        self.scroll = ctk.CTkScrollableFrame(self._main_container, fg_color="transparent")
+        self.scroll.pack(fill="both", expand=True, padx=12, pady=8)
 
-    def _build(self, why: str):
-        # Header
-        hdr = ctk.CTkFrame(self, fg_color="#1a1a1a", corner_radius=0)
-        hdr.pack(fill="x")
-        ctk.CTkLabel(hdr, text="Plan Next Cycle", font=("Roboto", 17, "bold")).pack(
-            anchor="w", padx=18, pady=(14, 2)
-        )
-        ctk.CTkLabel(hdr, text=why, font=("Roboto", 12), text_color="#888").pack(
-            anchor="w", padx=18, pady=(0, 12)
-        )
-
-        # Scrollable body
-        scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
-        scroll.pack(fill="both", expand=True, padx=12, pady=8)
-
-        for s_idx, ps in enumerate(self._planned):
-            # Session header row (date field + day badge)
-            s_hdr = ctk.CTkFrame(scroll, fg_color="#222", corner_radius=10)
-            s_hdr.pack(fill="x", pady=(10, 4))
-
-            ctk.CTkLabel(
-                s_hdr,
-                text=f"Day {ps.day_number}",
-                font=("Roboto", 13, "bold"),
-                fg_color="#6A1B9A",
-                corner_radius=6,
-                width=60,
-                height=26,
-            ).pack(side="left", padx=12, pady=8)
-
-            date_var = ctk.StringVar(value=ps.date_str)
-            self._date_vars.append(date_var)
-            ctk.CTkLabel(
-                s_hdr, text="Date:", font=("Roboto", 12), text_color="#aaa"
-            ).pack(side="left", padx=(8, 2))
-            ctk.CTkEntry(
-                s_hdr, textvariable=date_var, width=110, height=28, font=("Roboto", 12)
-            ).pack(side="left", padx=(0, 12))
-
-            # Column headers
-            col_hdr = ctk.CTkFrame(scroll, fg_color="transparent")
-            col_hdr.pack(fill="x", padx=8)
-            for text, w in [
-                ("Exercise", 200),
-                ("Sets", 50),
-                ("Reps", 100),
-                ("Mass (kg)", 140),
-                ("Comment", 0),
-            ]:
-                ctk.CTkLabel(
-                    col_hdr,
-                    text=text,
-                    font=("Roboto", 11),
-                    text_color="#666",
-                    width=w,
-                    anchor="w",
-                ).pack(side="left", padx=4)
-
-            # Exercise rows
-            for e_idx, ex in enumerate(ps.exercises):
-                ex_row = ctk.CTkFrame(scroll, fg_color="transparent")
-                ex_row.pack(fill="x", padx=8, pady=2)
-
-                ctk.CTkLabel(
-                    ex_row,
-                    text=ex.display_name,
-                    font=("Roboto", 12),
-                    width=200,
-                    anchor="w",
-                    text_color="#ddd",
-                ).pack(side="left", padx=4)
-
-                sets_v = ctk.StringVar(value=str(ex.sets))
-                reps_v = ctk.StringVar(value=str(ex.reps))
-                mass_v = ctk.StringVar(value=str(ex.mass))
-                comment_v = ctk.StringVar(value=ex.comment)
-
-                for var, w in [
-                    (sets_v, 5),    # ~40px
-                    (reps_v, 12),   # ~96px
-                    (mass_v, 17),   # ~136px
-                ]:  # widths in chars for tk.Entry
-                    e = tk.Entry(
-                        ex_row,
-                        textvariable=var,
-                        width=w,
-                        font=("Arial", 12),
-                        bg="#222222",
-                        fg="#dddddd",
-                        insertbackground="white",
-                        relief="flat",
-                        highlightbackground="#444444",
-                        highlightthickness=1,
-                    )
-                    e.pack(side="left", padx=4, ipady=4)
-
-                comment_e = tk.Entry(
-                    ex_row,
-                    textvariable=comment_v,
-                    font=("Arial", 12),
-                    bg="#222222",
-                    fg="#dddddd",
-                    insertbackground="white",
-                    relief="flat",
-                    highlightbackground="#444444",
-                    highlightthickness=1,
-                )
-                comment_e.pack(side="left", padx=4, fill="x", expand=True, ipady=4)
-
-                def make_add_mass_cb(m_var=mass_v, c_var=comment_v):
-                    def cb():
-                        m_str = m_var.get()
-                        parts = [p.strip() for p in m_str.split(",") if p.strip()]
-                        new_parts = []
-                        for p in parts:
-                            try:
-                                v = float(p)
-                                if v > 0: v += 2.5
-                                new_parts.append(f"{v:g}")
-                            except ValueError:
-                                new_parts.append(p)
-                        if new_parts:
-                            m_var.set(", ".join(new_parts))
-                            
-                        c = c_var.get()
-                        match = re.search(r'\+([0-9.]+) kg', c)
-                        if match:
-                            curr_plus = float(match.group(1))
-                            c = re.sub(r'\+[0-9.]+ kg', f'+{curr_plus + 2.5:g} kg', c)
-                        else:
-                            c = (c + " +2.5 kg").strip()
-                        c_var.set(c)
-                    return cb
-                
-                def make_add_reps_cb(r_var=reps_v, c_var=comment_v):
-                    def cb():
-                        r_str = r_var.get()
-                        parts = [p.strip() for p in r_str.split(",") if p.strip()]
-                        new_parts = []
-                        for p in parts:
-                            try:
-                                v = int(float(p))
-                                v += 2
-                                new_parts.append(str(v))
-                            except ValueError:
-                                new_parts.append(p)
-                        if new_parts:
-                            r_var.set(", ".join(new_parts))
-                            
-                        c = c_var.get()
-                        match = re.search(r'\+([0-9]+) reps', c)
-                        if match:
-                            curr_plus = int(match.group(1))
-                            c = re.sub(r'\+[0-9]+ reps', f'+{curr_plus + 2} reps', c)
-                        else:
-                            c = (c + " +2 reps").strip()
-                        c_var.set(c)
-                    return cb
-
-                ctk.CTkButton(
-                    ex_row, text="+2.5 kg", width=60, height=24, font=("Roboto", 11),
-                    fg_color="#1B5E20", hover_color="#2E7D32", 
-                    command=make_add_mass_cb()
-                ).pack(side="left", padx=2)
-
-                ctk.CTkButton(
-                    ex_row, text="+2 Reps", width=60, height=24, font=("Roboto", 11),
-                    fg_color="#6A1B9A", hover_color="#7B1FA2", 
-                    command=make_add_reps_cb()
-                ).pack(side="left", padx=2)
-
-                self._widgets.append((s_idx, e_idx, sets_v, reps_v, mass_v, comment_v))
-
-        # Footer buttons
+        # Footer
         footer = ctk.CTkFrame(self, fg_color="#111", corner_radius=0)
         footer.pack(fill="x", side="bottom")
+        
         ctk.CTkButton(
-            footer,
-            text="Cancel",
-            width=110,
-            fg_color="#333",
-            hover_color="#444",
-            command=self.destroy,
+            footer, text="Cancel", width=110, fg_color="#333", hover_color="#444", command=self.destroy
         ).pack(side="left", padx=16, pady=12)
+        
+        ctk.CTkButton(
+            footer, text="+ Add Day", width=110, fg_color="#6A1B9A", hover_color="#7B1FA2", command=self._add_day
+        ).pack(side="left", padx=16, pady=12)
+        
+        save_btn_text = "✅ Save Split" if self._mode in ["initial", "post_pr"] else "✅ Write to sessions.py"
         ctk.CTkButton(
             footer,
-            text="✅  Write to sessions.py",
+            text=save_btn_text,
             width=200,
             fg_color="#1B5E20",
             hover_color="#2E7D32",
             font=("Roboto", 13, "bold"),
             command=self._on_confirm,
         ).pack(side="right", padx=16, pady=12)
+        
+        from core.standards import EXERCISE_STANDARDS
+        self._standards = EXERCISE_STANDARDS
+
+        self._build_content()
+
+    def _add_day(self):
+        self._save_state()
+        from core.plan_generator import PlannedSession
+        dn = len(self._planned) + 1
+        base_date = datetime.now().strftime("%Y-%m-%d")
+        if self._planned:
+            base_date = self._planned[-1].date_str
+        self._planned.append(PlannedSession(day_number=dn, date_str=base_date, exercises=[]))
+        self._build_content()
+
+    def _save_state(self):
+        for ps, ex, row_frame, name_str, sets_v, reps_v, mass_v, comment_v in self._widgets:
+            if not row_frame.winfo_exists(): continue
+            ex.var_name = name_str.get().strip()
+            try: ex.sets = max(1, int(sets_v.get()))
+            except ValueError: pass
+            ex.reps = reps_v.get().strip()
+            ex.mass = mass_v.get().strip()
+            ex.comment = comment_v.get().strip()
+
+        for ps, date_var in self._date_vars:
+            ps.date_str = date_var.get().strip()
+
+    def _build_content(self):
+        for w in self.scroll.winfo_children():
+            w.destroy()
+        self._widgets.clear()
+        self._date_vars.clear()
+        self._day_containers = []
+
+        hdr = ctk.CTkFrame(self.scroll, fg_color="#1a1a1a", corner_radius=0)
+        hdr.pack(fill="x")
+        ctk.CTkLabel(hdr, text=self.title(), font=("Roboto", 17, "bold")).pack(
+            anchor="w", padx=10, pady=(10, 2)
+        )
+        txt = (
+            "Define your training split. Type an exercise name to configure sets/reps.\n"
+            "An autocomplete drop-down will suggest exercises from the library as you type."
+        )
+        ctk.CTkLabel(hdr, text=txt, font=("Roboto", 12), text_color="#888", justify="left").pack(
+            anchor="w", padx=10, pady=(0, 10)
+        )
+
+        for s_idx, ps in enumerate(self._planned):
+            day_container = ctk.CTkFrame(self.scroll, fg_color="transparent")
+            day_container.pack(fill="x", pady=4)
+            self._day_containers.append(day_container)
+
+            s_hdr = ctk.CTkFrame(day_container, fg_color="#222", corner_radius=10)
+            s_hdr.pack(fill="x", pady=(10, 4))
+
+            ctk.CTkLabel(
+                s_hdr, text=f"Day {ps.day_number}", font=("Roboto", 13, "bold"),
+                fg_color="#00695c", corner_radius=6, width=60, height=26,
+            ).pack(side="left", padx=12, pady=8)
+
+            date_var = ctk.StringVar(value=ps.date_str)
+            self._date_vars.append((ps, date_var))
+            ctk.CTkLabel(s_hdr, text="Date:", font=("Roboto", 12), text_color="#aaa").pack(side="left", padx=(8, 2))
+            ctk.CTkEntry(s_hdr, textvariable=date_var, width=110, height=28, font=("Roboto", 12)).pack(side="left", padx=(0, 12))
+
+            ctk.CTkButton(
+                s_hdr, text="+ Add Exercise", width=100, height=28,
+                fg_color="#0277bd", hover_color="#01579b",
+                command=lambda p=ps, c=day_container: self._fast_add_exercise(p, c)
+            ).pack(side="right", padx=12)
+
+            col_hdr = ctk.CTkFrame(day_container, fg_color="transparent")
+            col_hdr.pack(fill="x", padx=8)
+            
+            # Matched widths for alignment: 215, 55, 115, 165, remainder, etc.
+            # Base tk.Entry width is in chars. 
+            # width=24 -> ~215px | width=5 -> ~55px | width=12 -> ~115px | width=17 -> ~165px
+            layout = [
+                ("Exercise Name / Slug", 215), 
+                ("Sets", 55), 
+                ("Reps", 115), 
+                ("Mass (kg)", 165), 
+                ("Comment", 150),
+                ("Quick Actions", 0)
+            ]
+            for text, w in layout:
+                ctk.CTkLabel(col_hdr, text=text, font=("Roboto", 11, "bold"), text_color="#777", width=w, anchor="w").pack(side="left", padx=4)
+
+            for ex in ps.exercises:
+                self._build_exercise_row(ps, ex, day_container)
+
+    def _fast_add_exercise(self, ps, container):
+        self._save_state()
+        from core.plan_generator import PlannedExercise
+        new_ex = PlannedExercise(var_name="", display_name="", sets=3, reps="8", mass="0", comment="")
+        ps.exercises.append(new_ex)
+        self._build_exercise_row(ps, new_ex, container)
+
+    def _fast_remove_exercise(self, ps, ex, row_frame):
+        self._save_state()
+        if ex in ps.exercises:
+            ps.exercises.remove(ex)
+        row_frame.destroy()
+
+    def _build_exercise_row(self, ps, ex, container):
+        ex_row = ctk.CTkFrame(container, fg_color="transparent")
+        ex_row.pack(fill="x", padx=8, pady=2)
+
+        name_v = ctk.StringVar(value=ex.var_name)
+        sets_v = ctk.StringVar(value=str(ex.sets))
+        reps_v = ctk.StringVar(value=str(ex.reps))
+        mass_v = ctk.StringVar(value=str(ex.mass))
+        comment_v = ctk.StringVar(value=ex.comment)
+
+        name_e = tk.Entry(
+            ex_row, textvariable=name_v, width=24, font=("Arial", 12),
+            bg="#222222", fg="#dddddd", insertbackground="white",
+            relief="flat", highlightbackground="#444444", highlightthickness=1
+        )
+        name_e.pack(side="left", padx=4, ipady=4)
+        
+        self._setup_autocomplete(name_e, name_v)
+
+        for var, w in [(sets_v, 5), (reps_v, 12), (mass_v, 17)]:
+            e = tk.Entry(
+                ex_row, textvariable=var, width=w, font=("Arial", 12),
+                bg="#222222", fg="#dddddd", insertbackground="white",
+                relief="flat", highlightbackground="#444444", highlightthickness=1
+            )
+            e.pack(side="left", padx=4, ipady=4)
+
+        comment_e = tk.Entry(
+            ex_row, textvariable=comment_v, width=15, font=("Arial", 12),
+            bg="#222222", fg="#dddddd", insertbackground="white",
+            relief="flat", highlightbackground="#444444", highlightthickness=1
+        )
+        comment_e.pack(side="left", padx=4, fill="x", expand=True, ipady=4)
+        
+        # Helpers
+        def make_add_mass_cb(m_var=mass_v, c_var=comment_v):
+            def cb():
+                m_str = m_var.get()
+                parts = [p.strip() for p in m_str.split(",") if p.strip()]
+                new_parts = []
+                for p in parts:
+                    try:
+                        v = float(p)
+                        if v > 0: v += 2.5
+                        new_parts.append(f"{v:g}")
+                    except ValueError:
+                        new_parts.append(p)
+                if new_parts:
+                    m_var.set(", ".join(new_parts))
+                    
+                c = c_var.get()
+                import re
+                match = re.search(r'\+([0-9.]+) kg', c)
+                if match:
+                    curr_plus = float(match.group(1))
+                    c = re.sub(r'\+[0-9.]+ kg', f'+{curr_plus + 2.5:g} kg', c)
+                else:
+                    c = (c + " +2.5 kg").strip()
+                c_var.set(c)
+            return cb
+        
+        def make_add_reps_cb(r_var=reps_v, c_var=comment_v):
+            def cb():
+                r_str = r_var.get()
+                parts = [p.strip() for p in r_str.split(",") if p.strip()]
+                new_parts = []
+                for p in parts:
+                    try:
+                        v = int(float(p))
+                        v += 2
+                        new_parts.append(str(v))
+                    except ValueError:
+                        new_parts.append(p)
+                if new_parts:
+                    r_var.set(", ".join(new_parts))
+                    
+                c = c_var.get()
+                import re
+                match = re.search(r'\+([0-9]+) reps', c)
+                if match:
+                    curr_plus = int(match.group(1))
+                    c = re.sub(r'\+[0-9]+ reps', f'+{curr_plus + 2} reps', c)
+                else:
+                    c = (c + " +2 reps").strip()
+                c_var.set(c)
+            return cb
+
+        ctk.CTkButton(
+            ex_row, text="+2.5 kg", width=60, height=24, font=("Roboto", 11),
+            fg_color="#1B5E20", hover_color="#2E7D32", 
+            command=make_add_mass_cb()
+        ).pack(side="left", padx=2)
+
+        ctk.CTkButton(
+            ex_row, text="+2 Reps", width=60, height=24, font=("Roboto", 11),
+            fg_color="#6A1B9A", hover_color="#7B1FA2", 
+            command=make_add_reps_cb()
+        ).pack(side="left", padx=2)
+        
+        ctk.CTkButton(
+            ex_row, text="X", width=28, height=24, fg_color="#c62828", hover_color="#b71c1c",
+            command=lambda: self._fast_remove_exercise(ps, ex, ex_row)
+        ).pack(side="left", padx=2)
+
+        self._widgets.append((ps, ex, ex_row, name_v, sets_v, reps_v, mass_v, comment_v))
+
+    def _setup_autocomplete(self, entry, var):
+        # State held via entry dictionary
+        if not hasattr(entry, "popup"):
+            entry.popup = None
+
+        def on_keyrelease(event):
+            # ignore navigation keys
+            if event.keysym in ("Up", "Down", "Return", "Escape", "Left", "Right"):
+                return
+                
+            import re
+            val = re.sub(r'\W+', '_', var.get().lower()).strip('_')
+            if val and val[0].isdigit(): val = "_" + val
+            
+            if not val:
+                close_popup()
+                entry.config(fg="#dddddd")
+                return
+                
+            matches = [s for s in self._standards if val in s]
+            
+            # color validation
+            if val in self._standards:
+                entry.config(fg="#4caf50")
+            elif matches:
+                entry.config(fg="#ffeb3b")
+            else:
+                entry.config(fg="#ffab91")
+                
+            if not matches or val in self._standards:
+                close_popup()
+                return
+                
+            if not entry.popup:
+                entry.popup = tk.Toplevel(entry)
+                entry.popup.wm_overrideredirect(True)
+                entry.popup.configure(bg="#333333")
+                
+                listbox = tk.Listbox(
+                    entry.popup, font=("Arial", 11), bg="#333", fg="#ddd", 
+                    selectbackground="#0277bd", highlightthickness=1,
+                    highlightbackground="#555", highlightcolor="#555"
+                )
+                listbox.pack(fill="both", expand=True)
+                
+                def on_select(e=None):
+                    if not listbox.curselection(): return
+                    sel = listbox.get(listbox.curselection()[0])
+                    var.set(sel)
+                    entry.config(fg="#4caf50")
+                    close_popup()
+                    entry.focus_set()
+                    entry.icursor(tk.END)
+                    
+                listbox.bind("<ButtonRelease-1>", on_select)
+                entry.popup.listbox = listbox
+            else:
+                entry.popup.listbox.delete(0, tk.END)
+                
+            # Compute position globally
+            x = entry.winfo_rootx()
+            y = entry.winfo_rooty() + entry.winfo_height()
+            w = entry.winfo_width()
+            h = min(100, len(matches) * 22) + 2
+            entry.popup.wm_geometry(f"{w}x{h}+{x}+{y}")
+            
+            for m in matches:
+                entry.popup.listbox.insert(tk.END, m)
+
+        def on_updown(event):
+            if not entry.popup: return
+            lb = entry.popup.listbox
+            curr = lb.curselection()
+            idx = curr[0] if curr else -1
+            if event.keysym == "Down":
+                idx = min(idx + 1, lb.size() - 1)
+            elif event.keysym == "Up":
+                idx = max(idx - 1, 0)
+            lb.selection_clear(0, tk.END)
+            lb.selection_set(idx)
+            lb.see(idx)
+            return "break"
+            
+        def on_return(event):
+            if entry.popup and entry.popup.listbox.curselection():
+                sel = entry.popup.listbox.get(entry.popup.listbox.curselection()[0])
+                var.set(sel)
+                entry.config(fg="#4caf50")
+                close_popup()
+                return "break"
+
+        def close_popup(*args):
+            if entry.popup:
+                entry.popup.destroy()
+                entry.popup = None
+
+        entry.bind("<KeyRelease>", on_keyrelease)
+        entry.bind("<Down>", on_updown)
+        entry.bind("<Up>", on_updown)
+        entry.bind("<Return>", on_return)
+        # Delay closing so mouse clicks can register
+        entry.bind("<FocusOut>", lambda e: entry.after(150, close_popup))
+        self.bind("<Configure>", lambda e: close_popup(), add="+") 
 
     def _on_confirm(self):
-        from core.plan_generator import write_planned_sessions
-
-        # Read back all edits from widget vars
-        for s_idx, e_idx, sets_v, reps_v, mass_v, comment_v in self._widgets:
-            ex = self._planned[s_idx].exercises[e_idx]
-            try:
-                ex.sets = max(1, int(sets_v.get()))
-                ex.reps = reps_v.get().strip()
-                ex.mass = mass_v.get().strip()
-                ex.comment = comment_v.get().strip()
-            except ValueError:
-                pass  # keep original if parse fails
-
-        # Apply edited dates
-        for s_idx, date_var in enumerate(self._date_vars):
-            self._planned[s_idx].date_str = date_var.get().strip()
-
+        self._save_state()
+        
+        # Validation
+        for s_idx, ps in enumerate(self._planned):
+            for e_idx, ex in enumerate(ps.exercises):
+                if not ex.var_name.strip():
+                    import tkinter.messagebox as mb
+                    mb.showerror("Validation Error", f"Exercise name cannot be empty (Day {ps.day_number}, row {e_idx + 1}).", parent=self)
+                    return
+                    
+                reps_list = [r.strip() for r in str(ex.reps).split(",") if r.strip()]
+                mass_list = [m.strip() for m in str(ex.mass).split(",") if m.strip()]
+                
+                if len(reps_list) > 1 and len(reps_list) != ex.sets:
+                    import tkinter.messagebox as mb
+                    mb.showerror("Validation Error", f"In '{ex.var_name}' (Day {ps.day_number}): You specified {ex.sets} sets, but provided {len(reps_list)} rep values.\nProvide 1 unified value, or exactly {ex.sets}.", parent=self)
+                    return
+                    
+                if len(mass_list) > 1 and len(mass_list) != ex.sets:
+                    import tkinter.messagebox as mb
+                    mb.showerror("Validation Error", f"In '{ex.var_name}' (Day {ps.day_number}): You specified {ex.sets} sets, but provided {len(mass_list)} mass values.\nProvide 1 unified value, or exactly {ex.sets}.", parent=self)
+                    return
+        
         try:
-            write_planned_sessions(self._file_path, self._planned)
+            if self._mode == "initial":
+                if self._profile_is_edit:
+                    self._parent_app.manager.update_profile(self._profile_index, self._profile)
+                else:
+                    self._parent_app.manager.add_profile(self._profile)
+                self._parent_app.init_menu()
+                
+                from core.plan_generator import create_initial_sessions_py
+                create_initial_sessions_py(self._file_path, self._profile.name, self._profile.sex, self._planned)
+                
+                self._parent_app.show_dashboard()
+                self._parent_app.set_status("✅ Initial split created!", "green", 5000)
+            else:
+                from core.plan_generator import write_planned_sessions
+                write_planned_sessions(self._file_path, self._planned)
+                
+                import threading
+                threading.Thread(target=self._parent_app._load_recent_sessions, daemon=True).start()
+                self._parent_app.set_status(f"✅ Created plan with {len(self._planned)} days", "#4caf50", auto_reset_ms=5000)
+
             self.confirmed = True
             self.destroy()
+            
         except Exception as e:
             import tkinter.messagebox as mb
-
-            mb.showerror("Write Error", str(e), parent=self)
-
+            mb.showerror("Save Error", str(e), parent=self)
 
 if __name__ == "__main__":
     app = IronLogApp()
