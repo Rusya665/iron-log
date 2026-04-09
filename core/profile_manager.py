@@ -62,7 +62,6 @@ class ProfileManager:
         self.auto_check_updates: bool = True
         self.load_profiles()
 
-
     def load_profiles(self):
         if not os.path.exists(PROFILES_FILE):
             # Attempt to migrate from legacy config
@@ -93,6 +92,15 @@ class ProfileManager:
                 self.auto_check_updates = data.get("auto_check_updates", True)
         except Exception as e:
             print(f"Error loading profiles: {e}")
+            # Reset to safe defaults if file is corrupted
+            self.profiles = []
+            self.active_profile_index = -1
+
+        # Sanitize index
+        if not self.profiles:
+            self.active_profile_index = -1
+        elif self.active_profile_index < 0 or self.active_profile_index >= len(self.profiles):
+            self.active_profile_index = 0
 
     def save_profiles(self):
         data = {

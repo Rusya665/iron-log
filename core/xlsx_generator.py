@@ -1,12 +1,12 @@
+import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Callable, Dict, List
 
 import xlsxwriter
-import statistics
 
-from core.standards import get_exercise_standard
 from core.models import Exercise, Log
+from core.standards import get_exercise_standard
 
 
 @dataclass
@@ -74,7 +74,14 @@ CHART_CONFIG = {
 
 
 class TrainingLogProcessor:
-    def __init__(self, output_path: str, exercises: List[Exercise], user_data: Dict[str, Dict[str, Log]], bodymass_log: dict, user_profile: dict = None):
+    def __init__(
+        self,
+        output_path: str,
+        exercises: List[Exercise],
+        user_data: Dict[str, Dict[str, Log]],
+        bodymass_log: dict,
+        user_profile: dict = None,
+    ):
         self.output_path = output_path
         self.exercises = exercises
         self.user_data = user_data
@@ -84,6 +91,7 @@ class TrainingLogProcessor:
 
         if not self.bodymass_log:
             import sys
+
             print("CRITICAL ERROR: 'BODYMASS_LOG' is empty.")
             sys.exit(1)
 
@@ -109,7 +117,7 @@ class TrainingLogProcessor:
             ("Novice", "Nov", "#7e03a8"),
             ("Intermediate", "Int", "#cb4679"),
             ("Advanced", "Adv", "#f89441"),
-            ("Elite", "Eli", "#f0f921")
+            ("Elite", "Eli", "#f0f921"),
         ]
         self.bg_levels = [
             ("Bg (Unt)", "#E8E8E8", 95),  # Light grey, near-invisible for untrained
@@ -117,41 +125,81 @@ class TrainingLogProcessor:
             ("Bg (Nov)", "#7e03a8", 90),
             ("Bg (Int)", "#cb4679", 90),
             ("Bg (Adv)", "#f89441", 90),
-            ("Bg (Eli)", "#f0f921", 90)
+            ("Bg (Eli)", "#f0f921", 90),
         ]
 
         self._init_styles()
 
     def _init_styles(self):
-        self.style_header_main = self.wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D7E4BC", "border": 1})
-        self.style_header_sub = self.wb.add_format({"bold": True, "align": "center", "bg_color": "#DAEEF3", "border": 1, "font_size": 9})
-        self.style_center_across = self.wb.add_format({"bold": True, "align": "center", "valign": "vcenter", "bg_color": "#D7E4BC", "border": 1})
+        self.style_header_main = self.wb.add_format(
+            {
+                "bold": True,
+                "align": "center",
+                "valign": "vcenter",
+                "bg_color": "#D7E4BC",
+                "border": 1,
+            }
+        )
+        self.style_header_sub = self.wb.add_format(
+            {
+                "bold": True,
+                "align": "center",
+                "bg_color": "#DAEEF3",
+                "border": 1,
+                "font_size": 9,
+            }
+        )
+        self.style_center_across = self.wb.add_format(
+            {
+                "bold": True,
+                "align": "center",
+                "valign": "vcenter",
+                "bg_color": "#D7E4BC",
+                "border": 1,
+            }
+        )
         self.style_center_across.set_center_across()
-        self.style_def_header = self.wb.add_format({"bold": True, "font_size": 12, "bottom": 2})
-        self.style_def_text = self.wb.add_format({"text_wrap": True, "align": "left", "valign": "top"})
-        self.style_date = self.wb.add_format({"num_format": "yyyy-mm-dd", "border": 1, "align": "left"})
+        self.style_def_header = self.wb.add_format(
+            {"bold": True, "font_size": 12, "bottom": 2}
+        )
+        self.style_def_text = self.wb.add_format(
+            {"text_wrap": True, "align": "left", "valign": "top"}
+        )
+        self.style_date = self.wb.add_format(
+            {"num_format": "yyyy-mm-dd", "border": 1, "align": "left"}
+        )
 
         self.num_styles = {}
         for m in self.metrics:
-            self.num_styles[m.name] = self.wb.add_format({"num_format": m.fmt_str, "border": 1, "align": "center"})
+            self.num_styles[m.name] = self.wb.add_format(
+                {"num_format": m.fmt_str, "border": 1, "align": "center"}
+            )
 
         self.level_styles = {
             "Untrained": self.wb.add_format({"align": "left"}),
-            "Beginner": self.wb.add_format({"bg_color": "#0d0887", "font_color": "#FFFFFF", "align": "left"}),
-            "Novice": self.wb.add_format({"bg_color": "#7e03a8", "font_color": "#FFFFFF", "align": "left"}),
-            "Intermediate": self.wb.add_format({"bg_color": "#cb4679", "font_color": "#FFFFFF", "align": "left"}),
+            "Beginner": self.wb.add_format(
+                {"bg_color": "#0d0887", "font_color": "#FFFFFF", "align": "left"}
+            ),
+            "Novice": self.wb.add_format(
+                {"bg_color": "#7e03a8", "font_color": "#FFFFFF", "align": "left"}
+            ),
+            "Intermediate": self.wb.add_format(
+                {"bg_color": "#cb4679", "font_color": "#FFFFFF", "align": "left"}
+            ),
             "Advanced": self.wb.add_format({"bg_color": "#f89441", "align": "left"}),
-            "Elite": self.wb.add_format({"bg_color": "#f0f921", "align": "left"})
+            "Elite": self.wb.add_format({"bg_color": "#f0f921", "align": "left"}),
         }
 
     def validate_data(self):
         """Check for mismatched reps and masses in user data."""
         for date_str, exercises in self.user_data.items():
             for ex_id, log in exercises.items():
-                if not isinstance(log, Log):    # skip Day and any future metadata
+                if not isinstance(log, Log):  # skip Day and any future metadata
                     continue
                 if len(log.reps) != len(log.mass):
-                    ex_name = next((e.display_name for e in self.exercises if e.id == ex_id), ex_id)
+                    ex_name = next(
+                        (e.display_name for e in self.exercises if e.id == ex_id), ex_id
+                    )
                     raise ValueError(
                         f"Data Error on {date_str} ({ex_name}):\n"
                         f"Found {len(log.reps)} reps but {len(log.mass)} masses.\n"
@@ -255,7 +303,7 @@ class TrainingLogProcessor:
             return
 
         sorted_dates = sorted(data.keys())
-        
+
         significant_dates = set(self.bodymass_log.keys())
         if sorted_dates:
             significant_dates.add(sorted_dates[0])
@@ -264,14 +312,21 @@ class TrainingLogProcessor:
         # Fill missing calendar dates to ensure color background transitions are vertical
         min_date_dt = datetime.strptime(sorted_dates[0], "%Y-%m-%d")
         max_date_dt = datetime.strptime(sorted_dates[-1], "%Y-%m-%d")
-        
+
         all_dates = []
         curr = min_date_dt
         while curr <= max_date_dt:
             all_dates.append(curr.strftime("%Y-%m-%d"))
             curr += timedelta(days=1)
 
-        LEVEL_MAP = {-1: "Bg (Unt)", 0: "Bg (Beg)", 1: "Bg (Nov)", 2: "Bg (Int)", 3: "Bg (Adv)", 4: "Bg (Eli)"}
+        LEVEL_MAP = {
+            -1: "Bg (Unt)",
+            0: "Bg (Beg)",
+            1: "Bg (Nov)",
+            2: "Bg (Int)",
+            3: "Bg (Adv)",
+            4: "Bg (Eli)",
+        }
         max_level_so_far = {ex.id: -1 for ex in self.exercises}
         sex = self.user_profile.get("sex", "male")
 
@@ -288,11 +343,21 @@ class TrainingLogProcessor:
                     continue
                 is_bw_pre = max(log_pre.mass) == 0
                 cap_pre = max(log_pre.reps) if is_bw_pre else calc_brzycki(log_pre)
-                std_beg = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Beginner", sex=sex)
-                std_nov = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Novice", sex=sex)
-                std_int = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Intermediate", sex=sex)
-                std_adv = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Advanced", sex=sex)
-                std_eli = get_exercise_standard(ex.id, date_str_pre, self.bodymass_log, "Elite", sex=sex)
+                std_beg = get_exercise_standard(
+                    ex.id, date_str_pre, self.bodymass_log, "Beginner", sex=sex
+                )
+                std_nov = get_exercise_standard(
+                    ex.id, date_str_pre, self.bodymass_log, "Novice", sex=sex
+                )
+                std_int = get_exercise_standard(
+                    ex.id, date_str_pre, self.bodymass_log, "Intermediate", sex=sex
+                )
+                std_adv = get_exercise_standard(
+                    ex.id, date_str_pre, self.bodymass_log, "Advanced", sex=sex
+                )
+                std_eli = get_exercise_standard(
+                    ex.id, date_str_pre, self.bodymass_log, "Elite", sex=sex
+                )
                 lv = -1
                 if std_eli > 0 and cap_pre >= std_eli:
                     lv = 4
@@ -309,7 +374,7 @@ class TrainingLogProcessor:
 
         for date_str in all_dates:
             self.ws_data.write(self.row_cursor, 0, date_str, self.style_date)
-            
+
             day_data = data.get(date_str, {})
             is_workout_day = bool(day_data)
 
@@ -317,14 +382,16 @@ class TrainingLogProcessor:
                 dt = datetime.strptime(date_str, "%Y-%m-%d")
                 year, week_num, _ = dt.isocalendar()
                 week_key = f"{year}-W{week_num:02d}"
-                self.weekly_sessions[week_key] = self.weekly_sessions.get(week_key, 0) + 1
+                self.weekly_sessions[week_key] = (
+                    self.weekly_sessions.get(week_key, 0) + 1
+                )
 
                 daily_vol = 0
                 daily_reps = 0
                 intensity_ratios = []
 
                 for ex_id, log in day_data.items():
-                    if not isinstance(log, Log):   # skip Day metadata
+                    if not isinstance(log, Log):  # skip Day metadata
                         continue
                     if not (log.reps and log.mass):
                         continue
@@ -349,24 +416,57 @@ class TrainingLogProcessor:
                             ratio = r / capacity if is_bodyweight else m / capacity
                             intensity_ratios.append(ratio)
 
-                daily_intensity = statistics.mean(intensity_ratios) if intensity_ratios else 0
-                self.ws_data.write(self.row_cursor, 1, daily_vol, self.num_styles["Volume"])
-                self.ws_data.write(self.row_cursor, 2, daily_reps, self.num_styles["Avg Mass"])
-                self.ws_data.write(self.row_cursor, 3, daily_intensity, self.wb.add_format({"num_format": "0%", "border": 1, "align": "center"}))
+                daily_intensity = (
+                    statistics.mean(intensity_ratios) if intensity_ratios else 0
+                )
+                self.ws_data.write(
+                    self.row_cursor, 1, daily_vol, self.num_styles["Volume"]
+                )
+                self.ws_data.write(
+                    self.row_cursor, 2, daily_reps, self.num_styles["Avg Mass"]
+                )
+                self.ws_data.write(
+                    self.row_cursor,
+                    3,
+                    daily_intensity,
+                    self.wb.add_format(
+                        {"num_format": "0%", "border": 1, "align": "center"}
+                    ),
+                )
 
             for ex in self.exercises:
-                has_data = is_workout_day and ex.id in day_data and sum(day_data[ex.id].reps) > 0
+                has_data = (
+                    is_workout_day
+                    and ex.id in day_data
+                    and sum(day_data[ex.id].reps) > 0
+                )
                 raw_input = day_data.get(ex.id) if has_data else None
 
                 if has_data:
-                    is_bodyweight = max(raw_input.mass) == 0 if raw_input.mass else False
-                    cap = max(raw_input.reps) if is_bodyweight else calc_brzycki(raw_input)
+                    is_bodyweight = (
+                        max(raw_input.mass) == 0 if raw_input.mass else False
+                    )
+                    cap = (
+                        max(raw_input.reps)
+                        if is_bodyweight
+                        else calc_brzycki(raw_input)
+                    )
 
-                    std_beg = get_exercise_standard(ex.id, date_str, self.bodymass_log, "Beginner", sex=sex)
-                    std_nov = get_exercise_standard(ex.id, date_str, self.bodymass_log, "Novice", sex=sex)
-                    std_int = get_exercise_standard(ex.id, date_str, self.bodymass_log, "Intermediate", sex=sex)
-                    std_adv = get_exercise_standard(ex.id, date_str, self.bodymass_log, "Advanced", sex=sex)
-                    std_eli = get_exercise_standard(ex.id, date_str, self.bodymass_log, "Elite", sex=sex)
+                    std_beg = get_exercise_standard(
+                        ex.id, date_str, self.bodymass_log, "Beginner", sex=sex
+                    )
+                    std_nov = get_exercise_standard(
+                        ex.id, date_str, self.bodymass_log, "Novice", sex=sex
+                    )
+                    std_int = get_exercise_standard(
+                        ex.id, date_str, self.bodymass_log, "Intermediate", sex=sex
+                    )
+                    std_adv = get_exercise_standard(
+                        ex.id, date_str, self.bodymass_log, "Advanced", sex=sex
+                    )
+                    std_eli = get_exercise_standard(
+                        ex.id, date_str, self.bodymass_log, "Elite", sex=sex
+                    )
 
                     today_level = -1
                     if std_eli > 0 and cap >= std_eli:
@@ -398,15 +498,29 @@ class TrainingLogProcessor:
                     elif m.name.startswith("Std ("):
                         if date_str in significant_dates:
                             level_str = m.name[5:8]
-                            map_std = {"Beg": "Beginner", "Nov": "Novice", "Int": "Intermediate", "Adv": "Advanced", "Eli": "Elite"}
-                            val = get_exercise_standard(ex.id, date_str, self.bodymass_log, map_std.get(level_str), sex=sex)
+                            map_std = {
+                                "Beg": "Beginner",
+                                "Nov": "Novice",
+                                "Int": "Intermediate",
+                                "Adv": "Advanced",
+                                "Eli": "Elite",
+                            }
+                            val = get_exercise_standard(
+                                ex.id,
+                                date_str,
+                                self.bodymass_log,
+                                map_std.get(level_str),
+                                sex=sex,
+                            )
                             if val == 0:
                                 val = None
                     elif has_data:
                         val = m.func(raw_input)
-                        
+
                     if val is not None:
-                        self.ws_data.write(self.row_cursor, col_idx, val, self.num_styles[m.name])
+                        self.ws_data.write(
+                            self.row_cursor, col_idx, val, self.num_styles[m.name]
+                        )
             self.row_cursor += 1
 
     def write_calculations(self):
@@ -414,7 +528,9 @@ class TrainingLogProcessor:
         self.ws_calculations.write(0, 1, "Total Volume", self.style_header_sub)
 
         row = 1
-        sorted_vols = sorted(self.exercise_volumes.items(), key=lambda x: x[1], reverse=True)
+        sorted_vols = sorted(
+            self.exercise_volumes.items(), key=lambda x: x[1], reverse=True
+        )
         self.calc_vol_rows = len(sorted_vols)
 
         for ex_id, vol in sorted_vols:
@@ -445,25 +561,33 @@ class TrainingLogProcessor:
         measurement_keys = set()
         for data in self.bodymass_log.values():
             if isinstance(data, dict):
-                measurement_keys.update([k for k in data.keys() if k.lower() not in ("mass", "weight")])
-                
+                measurement_keys.update(
+                    [k for k in data.keys() if k.lower() not in ("mass", "weight")]
+                )
+
         m_keys = sorted(list(measurement_keys))
         for i, k in enumerate(m_keys):
-            self.ws_calculations.write(0, 8 + i, f"{k.capitalize()} (cm)", self.style_header_sub)
-            
+            self.ws_calculations.write(
+                0, 8 + i, f"{k.capitalize()} (cm)", self.style_header_sub
+            )
+
         row = 1
         sorted_dates = sorted(self.bodymass_log.keys())
         self.bw_rows = len(sorted_dates)
         self.measurement_cols = len(m_keys)
-        
+
         for d_str in sorted_dates:
             data = self.bodymass_log[d_str]
-            mass = data if isinstance(data, (int, float)) else data.get("mass", data.get("weight", None))
-            
+            mass = (
+                data
+                if isinstance(data, (int, float))
+                else data.get("mass", data.get("weight", None))
+            )
+
             self.ws_calculations.write(row, 6, d_str)
             if mass is not None:
                 self.ws_calculations.write(row, 7, mass)
-                
+
             if isinstance(data, dict):
                 for i, k in enumerate(m_keys):
                     val = data.get(k)
@@ -473,15 +597,15 @@ class TrainingLogProcessor:
 
         # Training Day log — cols P, Q (indices 15, 16)
         td_col_date = 15
-        td_col_day  = 16
+        td_col_day = 16
         self.ws_calculations.write(0, td_col_date, "Date", self.style_header_sub)
-        self.ws_calculations.write(0, td_col_day,  "Training Day", self.style_header_sub)
+        self.ws_calculations.write(0, td_col_day, "Training Day", self.style_header_sub)
         self.ws_calculations.set_column(td_col_date, td_col_date, 12)
-        self.ws_calculations.set_column(td_col_day,  td_col_day,  13)
+        self.ws_calculations.set_column(td_col_day, td_col_day, 13)
 
         td_row = 1
-        self.td_rows = 0          # integer-day sessions (for chart)
-        self.pr_rows_range = []   # (row_idx,) for PR sessions
+        self.td_rows = 0  # integer-day sessions (for chart)
+        self.pr_rows_range = []  # (row_idx,) for PR sessions
 
         for d_str in sorted(self.user_data.keys()):
             session_day = self._get_session_day(self.user_data[d_str])
@@ -492,8 +616,7 @@ class TrainingLogProcessor:
             if isinstance(session_day, int):
                 self.td_rows += 1
             td_row += 1
-        self.td_total_rows = td_row - 1   # total rows written in training-day table
-
+        self.td_total_rows = td_row - 1  # total rows written in training-day table
 
     def write_personal_records(self):
         """Two side-by-side tables: Training PRs (left) and PR-session bests (right)."""
@@ -524,24 +647,22 @@ class TrainingLogProcessor:
 
         # Training PRs: Day(int) sessions OR sessions with no day metadata (legacy)
         training_prs = _find_pr(
-            self.exercises,
-            lambda d: d is None or isinstance(d, int)
+            self.exercises, lambda d: d is None or isinstance(d, int)
         )
         # PR-session bests: only sessions where day value is the string "PR"
         pr_session_bests = _find_pr(
-            self.exercises,
-            lambda d: isinstance(d, str) and d.upper() == "PR"
+            self.exercises, lambda d: isinstance(d, str) and d.upper() == "PR"
         )
 
         def _write_table(ws, col_offset, title, prs_dict):
-            ws.set_column(col_offset,     col_offset,     25)
+            ws.set_column(col_offset, col_offset, 25)
             ws.set_column(col_offset + 1, col_offset + 1, 14)
             ws.set_column(col_offset + 2, col_offset + 2, 14)
             ws.set_column(col_offset + 3, col_offset + 3, 16)
-            ws.write(0, col_offset,     title,           self.style_header_main)
-            ws.write(0, col_offset + 1, "PR Mass (kg)",  self.style_header_main)
+            ws.write(0, col_offset, title, self.style_header_main)
+            ws.write(0, col_offset + 1, "PR Mass (kg)", self.style_header_main)
             ws.write(0, col_offset + 2, "Date Achieved", self.style_header_main)
-            ws.write(0, col_offset + 3, "Strength Level",self.style_header_main)
+            ws.write(0, col_offset + 3, "Strength Level", self.style_header_main)
             row = 1
             for ex in self.exercises:
                 if ex.id not in prs_dict:
@@ -551,24 +672,28 @@ class TrainingLogProcessor:
                 reached_level = "Untrained"
                 for level in levels_to_check:
                     std_val = get_exercise_standard(
-                        ex.id, pr_date, self.bodymass_log, level,
-                        sex=self.user_profile.get("sex")
+                        ex.id,
+                        pr_date,
+                        self.bodymass_log,
+                        level,
+                        sex=self.user_profile.get("sex"),
                     )
                     if std_val > 0 and max_mass >= std_val:
                         reached_level = level
                         break
-                ws.write(row, col_offset,     ex.display_name)
+                ws.write(row, col_offset, ex.display_name)
                 ws.write(row, col_offset + 1, max_mass)
                 ws.write(row, col_offset + 2, pr_date)
                 style = self.level_styles.get(reached_level, self.style_def_text)
                 ws.write(row, col_offset + 3, reached_level, style)
                 row += 1
 
-        _write_table(self.ws_personal_records, 0,  "Training PRs",   training_prs)
-        _write_table(self.ws_personal_records, 5,  "PR Session Bests", pr_session_bests)
+        _write_table(self.ws_personal_records, 0, "Training PRs", training_prs)
+        _write_table(self.ws_personal_records, 5, "PR Session Bests", pr_session_bests)
 
-
-    def _create_summary_chart(self, metric_key: str, chart_title: str, y_axis_label: str, cell_position: str):
+    def _create_summary_chart(
+        self, metric_key: str, chart_title: str, y_axis_label: str, cell_position: str
+    ):
         width = CHART_CONFIG["summary"]["width"]
         height = CHART_CONFIG["summary"]["height"]
 
@@ -582,47 +707,68 @@ class TrainingLogProcessor:
         for ex in self.exercises:
             if metric_key in self.col_map[ex.id]:
                 col_idx = self.col_map[ex.id][metric_key]
-                chart.add_series({
-                    "name": ex.display_name,
-                    "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
-                    "values": ["Data_Log", 2, col_idx, self.row_cursor - 1, col_idx],
-                    "marker": {"type": "none"},
-                    "line": {"width": 2},
-                })
+                chart.add_series(
+                    {
+                        "name": ex.display_name,
+                        "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
+                        "values": [
+                            "Data_Log",
+                            2,
+                            col_idx,
+                            self.row_cursor - 1,
+                            col_idx,
+                        ],
+                        "marker": {"type": "none"},
+                        "line": {"width": 2},
+                    }
+                )
 
         self.ws_charts.insert_chart(cell_position, chart)
 
     def _create_body_comp_chart(self, cell_position: str) -> int:
         if self.bw_rows == 0:
             return 0
-            
+
         chart = self.wb.add_chart({"type": "line"})
         chart.set_title({"name": "Body Composition Progression"})
-        chart.set_size({"width": CHART_CONFIG["summary"]["width"], "height": CHART_CONFIG["summary"]["height"]})
+        chart.set_size(
+            {
+                "width": CHART_CONFIG["summary"]["width"],
+                "height": CHART_CONFIG["summary"]["height"],
+            }
+        )
         chart.set_x_axis({"name": "Date", "date_axis": True})
         chart.set_y_axis({"name": "Mass (kg)", "major_gridlines": {"visible": True}})
-        
-        chart.add_series({
-            "name": "Body Mass",
-            "categories": ["Calculations", 1, 6, self.bw_rows, 6],
-            "values": ["Calculations", 1, 7, self.bw_rows, 7],
-            "line": {"color": "#000000", "width": 2.5},
-            "marker": {"type": "none"}
-        })
-        
+
+        chart.add_series(
+            {
+                "name": "Body Mass",
+                "categories": ["Calculations", 1, 6, self.bw_rows, 6],
+                "values": ["Calculations", 1, 7, self.bw_rows, 7],
+                "line": {"color": "#000000", "width": 2.5},
+                "marker": {"type": "none"},
+            }
+        )
+
         if self.measurement_cols > 0:
             chart.set_y2_axis({"name": "Measurements (cm)"})
             colors = ["#FF5733", "#33FF57", "#3357FF", "#F333FF"]
             for i in range(self.measurement_cols):
-                chart.add_series({
-                    "name": ["Calculations", 0, 8 + i],
-                    "categories": ["Calculations", 1, 6, self.bw_rows, 6],
-                    "values": ["Calculations", 1, 8 + i, self.bw_rows, 8 + i],
-                    "y2_axis": True,
-                    "line": {"color": colors[i % len(colors)], "width": 2, "dash_type": "dash"},
-                    "marker": {"type": "none"}
-                })
-                
+                chart.add_series(
+                    {
+                        "name": ["Calculations", 0, 8 + i],
+                        "categories": ["Calculations", 1, 6, self.bw_rows, 6],
+                        "values": ["Calculations", 1, 8 + i, self.bw_rows, 8 + i],
+                        "y2_axis": True,
+                        "line": {
+                            "color": colors[i % len(colors)],
+                            "width": 2,
+                            "dash_type": "dash",
+                        },
+                        "marker": {"type": "none"},
+                    }
+                )
+
         chart.show_blanks_as("span")
         self.ws_charts.insert_chart(cell_position, chart)
         return self._pixels_to_rows(CHART_CONFIG["summary"]["height"]) + 2
@@ -643,23 +789,40 @@ class TrainingLogProcessor:
         w_indiv = CHART_CONFIG["individual"]["width"]
         h_indiv = CHART_CONFIG["individual"]["height"]
 
-        left_col_idx = 1  
+        left_col_idx = 1
         left_col_letter = xlsxwriter.utility.xl_col_to_name(left_col_idx)
-        cursor_left = 1  
+        cursor_left = 1
 
         right_col_idx = left_col_idx + self._pixels_to_cols(w_summary) + 0
         right_col_letter = xlsxwriter.utility.xl_col_to_name(right_col_idx)
-        cursor_right = 1  
+        cursor_right = 1
 
-        cursor_left += self._create_body_comp_chart(f"{left_col_letter}{cursor_left + 1}")
+        cursor_left += self._create_body_comp_chart(
+            f"{left_col_letter}{cursor_left + 1}"
+        )
 
-        self._create_summary_chart("Est 1RM", "Total Strength Overview (Est. 1RM)", "1RM (kg)", f"{left_col_letter}{cursor_left + 1}")
+        self._create_summary_chart(
+            "Est 1RM",
+            "Total Strength Overview (Est. 1RM)",
+            "1RM (kg)",
+            f"{left_col_letter}{cursor_left + 1}",
+        )
         cursor_left += self._pixels_to_rows(h_summary) + 2
 
-        self._create_summary_chart("Avg Mass", "Average Mass Overview", "Mass (kg)", f"{left_col_letter}{cursor_left + 1}")
+        self._create_summary_chart(
+            "Avg Mass",
+            "Average Mass Overview",
+            "Mass (kg)",
+            f"{left_col_letter}{cursor_left + 1}",
+        )
         cursor_left += self._pixels_to_rows(h_summary) + 2
 
-        self._create_summary_chart("Avg Reps", "Average Reps Overview", "Reps", f"{left_col_letter}{cursor_left + 1}")
+        self._create_summary_chart(
+            "Avg Reps",
+            "Average Reps Overview",
+            "Reps",
+            f"{left_col_letter}{cursor_left + 1}",
+        )
         cursor_left += self._pixels_to_rows(h_summary) + 2
 
         vol_chart = self.wb.add_chart({"type": "line"})
@@ -668,13 +831,15 @@ class TrainingLogProcessor:
         vol_chart.set_x_axis({"date_axis": True})
         vol_chart.set_y_axis({"name": "Volume", "major_gridlines": {"visible": True}})
         vol_chart.show_blanks_as("span")
-        vol_chart.add_series({
-            "name": "Daily Volume",
-            "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],  
-            "values": ["Data_Log", 2, 1, self.row_cursor - 1, 1],  
-            "line": {"color": "#4F81BD", "width": 2.25},
-            "marker": {"type": "none"},
-        })
+        vol_chart.add_series(
+            {
+                "name": "Daily Volume",
+                "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
+                "values": ["Data_Log", 2, 1, self.row_cursor - 1, 1],
+                "line": {"color": "#4F81BD", "width": 2.25},
+                "marker": {"type": "none"},
+            }
+        )
         self.ws_charts.insert_chart(f"{left_col_letter}{cursor_left + 1}", vol_chart)
 
         vol_chart_row = cursor_left
@@ -684,27 +849,33 @@ class TrainingLogProcessor:
         pie_chart.set_title({"name": "Total Volume Distribution"})
         pie_chart.set_size({"width": w_pie, "height": h_pie})
         if self.calc_vol_rows > 0:
-            pie_chart.add_series({
-                "name": "Volume",
-                "categories": ["Calculations", 1, 0, self.calc_vol_rows, 0],
-                "values": ["Calculations", 1, 1, self.calc_vol_rows, 1],
-                "data_labels": {"percentage": True},
-            })
+            pie_chart.add_series(
+                {
+                    "name": "Volume",
+                    "categories": ["Calculations", 1, 0, self.calc_vol_rows, 0],
+                    "values": ["Calculations", 1, 1, self.calc_vol_rows, 1],
+                    "data_labels": {"percentage": True},
+                }
+            )
         self.ws_charts.insert_chart(f"{right_col_letter}{cursor_right + 1}", pie_chart)
         cursor_right += self._pixels_to_rows(h_pie) + 2
 
         col_chart = self.wb.add_chart({"type": "column"})
         col_chart.set_title({"name": "Weekly Consistency (Sessions)"})
         col_chart.set_size({"width": w_col, "height": h_col})
-        col_chart.set_y_axis({"name": "Sessions", "major_gridlines": {"visible": True}, "min": 0})
+        col_chart.set_y_axis(
+            {"name": "Sessions", "major_gridlines": {"visible": True}, "min": 0}
+        )
         col_chart.set_legend({"none": True})
         if self.calc_week_rows > 0:
-            col_chart.add_series({
-                "name": "Sessions",
-                "categories": ["Calculations", 1, 3, self.calc_week_rows, 3],
-                "values": ["Calculations", 1, 4, self.calc_week_rows, 4],
-                "fill": {"color": "#9BBB59"},
-            })
+            col_chart.add_series(
+                {
+                    "name": "Sessions",
+                    "categories": ["Calculations", 1, 3, self.calc_week_rows, 3],
+                    "values": ["Calculations", 1, 4, self.calc_week_rows, 4],
+                    "fill": {"color": "#9BBB59"},
+                }
+            )
         self.ws_charts.insert_chart(f"{right_col_letter}{cursor_right + 1}", col_chart)
         cursor_right += self._pixels_to_rows(h_col) + 2
 
@@ -714,15 +885,24 @@ class TrainingLogProcessor:
         int_chart.set_title({"name": "Daily Relative Intensity (Avg Effort)"})
         int_chart.set_size({"width": w_summary, "height": h_summary})
         int_chart.set_x_axis({"date_axis": True})
-        int_chart.set_y_axis({"name": "Intensity (%)", "major_gridlines": {"visible": True}, "min": 0, "max": 1.0})
+        int_chart.set_y_axis(
+            {
+                "name": "Intensity (%)",
+                "major_gridlines": {"visible": True},
+                "min": 0,
+                "max": 1.0,
+            }
+        )
         int_chart.show_blanks_as("span")
-        int_chart.add_series({
-            "name": "Daily Intensity",
-            "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],  
-            "values": ["Data_Log", 2, 3, self.row_cursor - 1, 3],  
-            "line": {"color": "#C0504D", "width": 2.25},
-            "marker": {"type": "none"},
-        })
+        int_chart.add_series(
+            {
+                "name": "Daily Intensity",
+                "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
+                "values": ["Data_Log", 2, 3, self.row_cursor - 1, 3],
+                "line": {"color": "#C0504D", "width": 2.25},
+                "marker": {"type": "none"},
+            }
+        )
         self.ws_charts.insert_chart(f"{right_col_letter}{target_row + 1}", int_chart)
 
         max_cursor = max(cursor_left, cursor_right)
@@ -731,21 +911,37 @@ class TrainingLogProcessor:
 
         # Training Day pattern chart (only if Day data exists)
         if getattr(self, "td_total_rows", 0) > 0:
-            td_chart = self.wb.add_chart({"type": "scatter", "subtype": "straight_with_markers"})
+            td_chart = self.wb.add_chart(
+                {"type": "scatter", "subtype": "straight_with_markers"}
+            )
             td_chart.set_title({"name": "Training Day Pattern"})
-            td_chart.set_size({"width": CHART_CONFIG["summary"]["width"],
-                               "height": CHART_CONFIG["column"]["height"]})
+            td_chart.set_size(
+                {
+                    "width": CHART_CONFIG["summary"]["width"],
+                    "height": CHART_CONFIG["column"]["height"],
+                }
+            )
             td_chart.set_x_axis({"date_axis": True, "name": "Date"})
-            td_chart.set_y_axis({"name": "Day", "major_gridlines": {"visible": True}, "min": 0})
-            td_chart.add_series({
-                "name": "Training Day",
-                "categories": ["Calculations", 1, 15, self.td_total_rows, 15],
-                "values":     ["Calculations", 1, 16, self.td_total_rows, 16],
-                "marker": {"type": "circle", "size": 6,
-                            "fill": {"color": "#1565C0"}, "border": {"color": "#1565C0"}},
-                "line": {"color": "#90CAF9", "width": 1.5},
-            })
-            self.ws_charts.insert_chart(f"{right_col_letter}{cursor_right + 1}", td_chart)
+            td_chart.set_y_axis(
+                {"name": "Day", "major_gridlines": {"visible": True}, "min": 0}
+            )
+            td_chart.add_series(
+                {
+                    "name": "Training Day",
+                    "categories": ["Calculations", 1, 15, self.td_total_rows, 15],
+                    "values": ["Calculations", 1, 16, self.td_total_rows, 16],
+                    "marker": {
+                        "type": "circle",
+                        "size": 6,
+                        "fill": {"color": "#1565C0"},
+                        "border": {"color": "#1565C0"},
+                    },
+                    "line": {"color": "#90CAF9", "width": 1.5},
+                }
+            )
+            self.ws_charts.insert_chart(
+                f"{right_col_letter}{cursor_right + 1}", td_chart
+            )
             cursor_right += self._pixels_to_rows(CHART_CONFIG["column"]["height"]) + 2
 
         for ex in self.exercises:
@@ -763,7 +959,7 @@ class TrainingLogProcessor:
                         # Include both Avg Mass (with error) and Est 1RM in bounds calculation
                         all_mass_vals.append(m_mean - m_stdev)
                         all_mass_vals.append(m_mean + m_stdev)
-                        
+
                         # Use calc_brzycki logic to ensure we account for the PR line in zoom
                         m_1rm = calc_brzycki(log)
                         if m_1rm > 0:
@@ -778,9 +974,17 @@ class TrainingLogProcessor:
                 # Find the last bodymass date to get current standard values
                 sex = self.user_profile.get("sex", "male")
                 last_date = sorted(self.user_data.keys())[-1]
-                std_levels_ordered = ["Beginner", "Novice", "Intermediate", "Advanced", "Elite"]
+                std_levels_ordered = [
+                    "Beginner",
+                    "Novice",
+                    "Intermediate",
+                    "Advanced",
+                    "Elite",
+                ]
                 for lvl_name in std_levels_ordered:
-                    std_val = get_exercise_standard(ex.id, last_date, self.bodymass_log, lvl_name, sex=sex)
+                    std_val = get_exercise_standard(
+                        ex.id, last_date, self.bodymass_log, lvl_name, sex=sex
+                    )
                     if std_val and std_val > max_mass:
                         # Show the first tier above max performance with 10% margin
                         y_max = max(y_max, int(std_val * 1.10))
@@ -812,73 +1016,133 @@ class TrainingLogProcessor:
                 for bg_key, bg_color, trans in self.bg_levels:
                     if bg_key in self.col_map[ex.id]:
                         col_bg = self.col_map[ex.id][bg_key]
-                        bg_chart.add_series({
-                            "name": bg_key,
-                            "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
-                            "values": ["Data_Log", 2, col_bg, self.row_cursor - 1, col_bg],
-                            "fill": {"color": bg_color, "transparency": trans},
-                            "line": {"none": True},
-                        })
+                        bg_chart.add_series(
+                            {
+                                "name": bg_key,
+                                "categories": [
+                                    "Data_Log",
+                                    2,
+                                    0,
+                                    self.row_cursor - 1,
+                                    0,
+                                ],
+                                "values": [
+                                    "Data_Log",
+                                    2,
+                                    col_bg,
+                                    self.row_cursor - 1,
+                                    col_bg,
+                                ],
+                                "fill": {"color": bg_color, "transparency": trans},
+                                "line": {"none": True},
+                            }
+                        )
 
             # 2. CREATE LINE CHART SECOND (Becomes Secondary Combined Chart)
             mass_chart = self.wb.add_chart({"type": "line"})
-            mass_chart.show_blanks_as("span")  # Connect sparse standard lines across blank dates
-            
+            mass_chart.show_blanks_as(
+                "span"
+            )  # Connect sparse standard lines across blank dates
+
             col_mass = self.col_map[ex.id]["Avg Mass"]
             col_1rm = self.col_map[ex.id]["Est 1RM"]
             col_mass_err = self.col_map[ex.id]["Stdev Mass"]
 
-            start_cell = xlsxwriter.utility.xl_rowcol_to_cell(2, col_mass_err, row_abs=True, col_abs=True)
-            end_cell = xlsxwriter.utility.xl_rowcol_to_cell(self.row_cursor - 1, col_mass_err, row_abs=True, col_abs=True)
+            start_cell = xlsxwriter.utility.xl_rowcol_to_cell(
+                2, col_mass_err, row_abs=True, col_abs=True
+            )
+            end_cell = xlsxwriter.utility.xl_rowcol_to_cell(
+                self.row_cursor - 1, col_mass_err, row_abs=True, col_abs=True
+            )
             mass_err_ref = f"='Data_Log'!{start_cell}:{end_cell}"
 
-            mass_chart.add_series({
-                "name": f"{ex.display_name} Avg Mass",
-                "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
-                "values": ["Data_Log", 2, col_mass, self.row_cursor - 1, col_mass],
-                "line": {"color": "#203764", "width": 2.25},
-                "marker": {"type": "circle", "size": 5, "fill": {"color": "#203764"}, "border": {"color": "#203764"}},
-                "y_error_bars": {
-                    "type": "custom",
-                    "plus_values": mass_err_ref,
-                    "minus_values": mass_err_ref,
-                    "direction": "both",
-                    "end_style": "end",
-                    "line": {"color": "#B4C6E7", "width": 1.5},
-                },
-            })
+            mass_chart.add_series(
+                {
+                    "name": f"{ex.display_name} Avg Mass",
+                    "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
+                    "values": ["Data_Log", 2, col_mass, self.row_cursor - 1, col_mass],
+                    "line": {"color": "#203764", "width": 2.25},
+                    "marker": {
+                        "type": "circle",
+                        "size": 5,
+                        "fill": {"color": "#203764"},
+                        "border": {"color": "#203764"},
+                    },
+                    "y_error_bars": {
+                        "type": "custom",
+                        "plus_values": mass_err_ref,
+                        "minus_values": mass_err_ref,
+                        "direction": "both",
+                        "end_style": "end",
+                        "line": {"color": "#B4C6E7", "width": 1.5},
+                    },
+                }
+            )
 
             if self.user_profile.get("show_pr", True):
-                mass_chart.add_series({
-                    "name": series_2_name,
-                    "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
-                    "values": ["Data_Log", 2, col_1rm, self.row_cursor - 1, col_1rm],
-                    "line": {"color": "#C0504D", "width": 1.5, "dash_type": "dash"},
-                    "marker": {"type": "none"},
-                })
+                mass_chart.add_series(
+                    {
+                        "name": series_2_name,
+                        "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
+                        "values": [
+                            "Data_Log",
+                            2,
+                            col_1rm,
+                            self.row_cursor - 1,
+                            col_1rm,
+                        ],
+                        "line": {"color": "#C0504D", "width": 1.5, "dash_type": "dash"},
+                        "marker": {"type": "none"},
+                    }
+                )
 
             if self.user_profile.get("show_standards", True):
                 for m_key, m_label, m_color in self.levels:
                     std_key = f"Std ({m_label})"
                     if std_key in self.col_map[ex.id]:
                         col_std = self.col_map[ex.id][std_key]
-                        mass_chart.add_series({
-                            "name": m_label,
-                            "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
-                            "values": ["Data_Log", 2, col_std, self.row_cursor - 1, col_std],
-                            "line": {"color": m_color, "width": 1.25}, 
-                            "marker": {"type": "none"},
-                        })
+                        mass_chart.add_series(
+                            {
+                                "name": m_label,
+                                "categories": [
+                                    "Data_Log",
+                                    2,
+                                    0,
+                                    self.row_cursor - 1,
+                                    0,
+                                ],
+                                "values": [
+                                    "Data_Log",
+                                    2,
+                                    col_std,
+                                    self.row_cursor - 1,
+                                    col_std,
+                                ],
+                                "line": {"color": m_color, "width": 1.25},
+                                "marker": {"type": "none"},
+                            }
+                        )
 
             # 3. COMBINE AND CLAMP AXIS
             bg_chart.combine(mass_chart)
-            
-            bg_chart.set_y_axis({"name": y_axis_name, "major_gridlines": {"visible": True}, "min": y_min, "max": y_max})
-            bg_chart.set_title({"name": f"{ex.display_name} - Progress ({y_axis_name})"})
+
+            bg_chart.set_y_axis(
+                {
+                    "name": y_axis_name,
+                    "major_gridlines": {"visible": True},
+                    "min": y_min,
+                    "max": y_max,
+                }
+            )
+            bg_chart.set_title(
+                {"name": f"{ex.display_name} - Progress ({y_axis_name})"}
+            )
             bg_chart.set_size({"width": w_indiv, "height": h_indiv})
-            
+
             # Hide the 6 background area series from the legend
-            bg_chart.set_legend({"position": "bottom", "delete_series": [0, 1, 2, 3, 4, 5]})
+            bg_chart.set_legend(
+                {"position": "bottom", "delete_series": [0, 1, 2, 3, 4, 5]}
+            )
 
             self.ws_charts.insert_chart(f"{left_col_letter}{chart_pos_y}", bg_chart)
 
@@ -887,8 +1151,12 @@ class TrainingLogProcessor:
             reps_col_idx = 1 + self._pixels_to_cols(w_indiv) + 1
             reps_col_letter = xlsxwriter.utility.xl_col_to_name(reps_col_idx)
 
-            start_cell_reps = xlsxwriter.utility.xl_rowcol_to_cell(2, col_reps_err, row_abs=True, col_abs=True)
-            end_cell_reps = xlsxwriter.utility.xl_rowcol_to_cell(self.row_cursor - 1, col_reps_err, row_abs=True, col_abs=True)
+            start_cell_reps = xlsxwriter.utility.xl_rowcol_to_cell(
+                2, col_reps_err, row_abs=True, col_abs=True
+            )
+            end_cell_reps = xlsxwriter.utility.xl_rowcol_to_cell(
+                self.row_cursor - 1, col_reps_err, row_abs=True, col_abs=True
+            )
             reps_err_ref = f"='Data_Log'!{start_cell_reps}:{end_cell_reps}"
 
             reps_chart = self.wb.add_chart({"type": "line"})
@@ -896,21 +1164,28 @@ class TrainingLogProcessor:
             reps_chart.show_blanks_as("span")
             reps_chart.set_legend({"position": "bottom"})
 
-            reps_chart.add_series({
-                "name": "Avg Reps",
-                "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
-                "values": ["Data_Log", 2, col_reps, self.row_cursor - 1, col_reps],
-                "line": {"color": "#8064A2", "width": 2},
-                "marker": {"type": "circle", "size": 5, "fill": {"color": "#8064A2"}, "border": {"color": "#8064A2"}},
-                "y_error_bars": {
-                    "type": "custom",
-                    "plus_values": reps_err_ref,
-                    "minus_values": reps_err_ref,
-                    "direction": "both",
-                    "end_style": "end",
-                    "line": {"color": "#CCC0DA", "width": 1.5},
-                },
-            })
+            reps_chart.add_series(
+                {
+                    "name": "Avg Reps",
+                    "categories": ["Data_Log", 2, 0, self.row_cursor - 1, 0],
+                    "values": ["Data_Log", 2, col_reps, self.row_cursor - 1, col_reps],
+                    "line": {"color": "#8064A2", "width": 2},
+                    "marker": {
+                        "type": "circle",
+                        "size": 5,
+                        "fill": {"color": "#8064A2"},
+                        "border": {"color": "#8064A2"},
+                    },
+                    "y_error_bars": {
+                        "type": "custom",
+                        "plus_values": reps_err_ref,
+                        "minus_values": reps_err_ref,
+                        "direction": "both",
+                        "end_style": "end",
+                        "line": {"color": "#CCC0DA", "width": 1.5},
+                    },
+                }
+            )
 
             reps_chart.set_title({"name": f"{ex.display_name} - Reps Consistency"})
             reps_chart.set_size({"width": w_indiv, "height": h_indiv})
@@ -930,7 +1205,13 @@ class TrainingLogProcessor:
             else:
                 y_min_reps = 0
 
-            reps_chart.set_y_axis({"name": "Reps", "major_gridlines": {"visible": True}, "min": y_min_reps})
+            reps_chart.set_y_axis(
+                {
+                    "name": "Reps",
+                    "major_gridlines": {"visible": True},
+                    "min": y_min_reps,
+                }
+            )
             self.ws_charts.insert_chart(f"{reps_col_letter}{chart_pos_y}", reps_chart)
 
             chart_pos_y += self._pixels_to_rows(h_indiv) + 2
@@ -947,7 +1228,11 @@ class TrainingLogProcessor:
             sorted_dates = sorted(self.bodymass_log.keys(), reverse=True)
             for d in sorted_dates:
                 entry = self.bodymass_log[d]
-                m = entry if isinstance(entry, (int, float)) else entry.get("mass", entry.get("weight"))
+                m = (
+                    entry
+                    if isinstance(entry, (int, float))
+                    else entry.get("mass", entry.get("weight"))
+                )
                 if m is not None:
                     latest_mass = m
                     break
