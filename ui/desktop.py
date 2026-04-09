@@ -512,7 +512,9 @@ class IronLogApp(ctk.CTk):
                             return
                         else:
                             return
-                    # if True (Yes), we fall through and save normally
+                    # if True (Yes), we fall through and use the existing owner's name
+                    # to ensure the profile name matches SESSIONS_OWNER in sessions.py.
+                    name = existing_owner
 
             elif not os.path.exists(sessions_file):
                 validation_label.configure(
