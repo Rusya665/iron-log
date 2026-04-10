@@ -4,8 +4,17 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - '**.md'
+      - 'media/**'
+      - '.gitignore'
+      - 'LICENSE'
     tags:
       - 'v*' # Trigger on version tags, e.g., v1.0.0
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 # Grant write permissions so the action can create a Release
 permissions:
@@ -37,9 +46,14 @@ jobs:
         $VERSION = '${{ github.ref_name }}'.TrimStart('v')
         (Get-Content core/version.py) -replace '__version__ = ".*"', "__version__ = ""$VERSION""" | Set-Content core/version.py
 
+    - name: Install UPX
+      uses: crazy-max/ghaction-upx@v3
+      with:
+        install-only: true
+
     - name: Build with PyInstaller
       run: |
-        pyinstaller iron_log.spec
+        pyinstaller iron_log.spec --upx-dir ${{ env.UPX_INSTALL_DIR }}
 
     - name: Inject Version into Installer
       run: |
