@@ -42,7 +42,7 @@ def get_exercise_standard(
     if not current_bm:
         return 0
 
-    rounded_bm = int(round(current_bm / 5.0) * 5.0)
+    rounded_bm = int(current_bm / 5.0) * 5
     rounded_bm = max(50, min(rounded_bm, 140))
 
     # Strict lookup
@@ -70,6 +70,55 @@ def get_exercise_standard(
 
     clipped_bm = max(available_bms[0], min(rounded_bm, available_bms[-1]))
     return gender_table[clipped_bm].get(level, 0)
+
+
+def get_tiered_standards(exercise_id: str, sex: str, body_mass: float = None):
+    """
+    Returns a dictionary of standards for the given exercise and sex.
+    If body_mass is provided, returns 3 tiers: [rounded_mass-5, rounded_mass, rounded_mass+5].
+    Otherwise returns all available tiers for that exercise.
+    """
+    if not exercise_id:
+        return None
+
+    # Normalize lookup (same logic as in get_exercise_standard)
+    target_norm = exercise_id.lower().strip().replace(" ", "-")
+    found_slug = None
+
+    if target_norm in EXERCISE_STANDARDS:
+        found_slug = target_norm
+    else:
+        for slug, info in EXERCISE_STANDARDS.items():
+            if info.get("name", "").lower().strip().replace(" ", "-") == target_norm:
+                found_slug = slug
+                break
+
+    if not found_slug:
+        return None
+
+    gender_table = EXERCISE_STANDARDS[found_slug].get(sex.lower())
+    if not gender_table:
+        return None
+
+    available_bms = sorted(gender_table.keys())
+    if not available_bms:
+        return None
+
+    if body_mass is None:
+        return gender_table
+
+    # Anchor to the lower 5kg bracket (as requested)
+    rounded_bm = int(body_mass / 5.0) * 5
+
+    results = {}
+    for offset in [-5, 0, 5]:
+        target_bm = rounded_bm + offset
+        # Clip to available ranges in the database
+        clipped_bm = max(available_bms[0], min(target_bm, available_bms[-1]))
+        # We store under the 'requested' tier key even if clipped, for UI consistency
+        results[target_bm] = gender_table[clipped_bm]
+
+    return results
 
 
 # Consolidate exercise standards database

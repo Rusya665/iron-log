@@ -34,6 +34,160 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 
+class ExerciseToolTip:
+    """
+    A custom tooltip for exercises that shows strength standards on hover.
+    Includes technical stability fixes: timer management, screen coordinate
+    tracking, and borderless topmost window.
+    """
+
+    def __init__(self, widget, exercise_id, sex, mass=None, lift=None, is_pr=False):
+        self.widget = widget
+        self.exercise_id = exercise_id
+        self.sex = sex
+        self.mass = mass
+        self.lift = lift
+        self.is_pr = is_pr
+        self.tip_window = None
+        self.display_timer = None
+        self.is_expanded = False
+
+        self.widget.bind("<Enter>", self.on_enter)
+        self.widget.bind("<Leave>", self.on_leave)
+        self.widget.bind("<Button-1>", self.on_click, add="+")
+
+    def on_enter(self, event=None):
+        self._cancel_timers()
+        self.display_timer = self.widget.after(400, self.show_tip)
+
+    def on_leave(self, event=None):
+        self._cancel_timers()
+        self.hide_tip()
+        self.is_expanded = False
+
+    def on_click(self, event=None):
+        # Expand on left-click if tip is visible and not already expanded
+        if self.tip_window and not self.is_expanded:
+            self.expand_tip()
+
+    def _cancel_timers(self):
+        if self.display_timer:
+            self.widget.after_cancel(self.display_timer)
+            self.display_timer = None
+
+    def show_tip(self):
+        if self.tip_window:
+            return
+
+        # Resolved standards
+        from core.standards import get_tiered_standards
+
+        standards = get_tiered_standards(
+            self.exercise_id, self.sex, self.mass if not self.is_expanded else None
+        )
+
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.overrideredirect(True)
+        tw.wm_attributes("-topmost", True)
+
+        # Calculate position
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        tw.geometry(f"+{x}+{y}")
+
+        # Use a frame with a border to simulate CTk look
+        container = tk.Frame(tw, bg="#1c1c1e", highlightthickness=1, highlightbackground="#333")
+        container.pack(padx=1, pady=1)
+
+        if not standards:
+            tk.Label(
+                container,
+                text="  Standards not available  ",
+                bg="#1c1c1e",
+                fg="#aaa",
+                font=("Roboto", 11),
+            ).pack(padx=10, pady=5)
+        else:
+            self._render_table(container, standards)
+
+    def expand_tip(self):
+        self.is_expanded = True
+        self.hide_tip()
+        self.show_tip()
+
+    def hide_tip(self):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+
+    def _render_table(self, container, standards):
+        # We use grid layout with uniform columns to ensure perfect alignment
+        # even with proportional fonts like Roboto.
+        
+        # Header row
+        header = tk.Frame(container, bg="#252525")
+        header.pack(fill="x")
+        for i in range(6):
+            header.columnconfigure(i, weight=1, uniform="std_col")
+
+        cols = ["Mass", "Beg", "Nov", "Int", "Adv", "Eli"]
+        for i, c in enumerate(cols):
+            tk.Label(
+                header,
+                text=c,
+                bg="#252525",
+                fg="white",
+                font=("Roboto", 10, "bold"),
+                anchor="center",
+            ).grid(row=0, column=i, padx=4, pady=2, sticky="ew")
+
+        # Data rows
+        target_rounded_bm = int(self.mass / 5.0) * 5 if self.mass else -1
+
+        for bm, levels in sorted(standards.items()):
+            is_current_mass_row = bm == target_rounded_bm
+            
+            row_bg = "#252525" if is_current_mass_row else "#1c1c1e"
+            row = tk.Frame(container, bg=row_bg)
+            row.pack(fill="x")
+            for i in range(6):
+                row.columnconfigure(i, weight=1, uniform="std_col")
+            
+            row_font = ("Roboto", 10, "bold") if is_current_mass_row else ("Roboto", 10)
+
+            # Mass Column
+            tk.Label(
+                row,
+                text=f"{bm}kg",
+                bg=row_bg,
+                fg="#90caf9",
+                font=row_font,
+                anchor="w",
+            ).grid(row=0, column=0, padx=4, sticky="ew")
+            
+            # Standards columns
+            for i, level in enumerate(["Beginner", "Novice", "Intermediate", "Advanced", "Elite"], 1):
+                val = levels.get(level, "-")
+                
+                # Check achievement for PR sessions
+                achieved = False
+                if self.is_pr and self.lift and isinstance(val, (int, float)):
+                    if self.lift >= val:
+                        achieved = True
+                
+                text_color = "#4ade80" if achieved else "#dddddd"
+                cell_font = ("Roboto", 10, "bold") if (achieved or is_current_mass_row) else ("Roboto", 10)
+                
+                tk.Label(
+                    row,
+                    text=str(val),
+                    bg=row_bg,
+                    fg=text_color,
+                    font=cell_font,
+                    anchor="center",
+                ).grid(row=0, column=i, padx=4, sticky="ew")
+
+
 class IronLogApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -108,6 +262,23 @@ class IronLogApp(ctk.CTk):
         self._status_reset_id = None
         if hasattr(self, "status_label"):
             self.status_label.configure(text="Ready", text_color="gray")
+
+    def _resolve_mass_for_date(self, date_str, bm_log):
+        if not bm_log:
+            return None
+        dates = sorted(bm_log.keys())
+        applicable_date = None
+        for d in dates:
+            if d <= date_str:
+                applicable_date = d
+            else:
+                break
+        if not applicable_date:
+            return None
+        bm_entry = bm_log[applicable_date]
+        return (
+            bm_entry if isinstance(bm_entry, (int, float)) else bm_entry.get("mass", 0)
+        )
 
     # -------------------------------------------------------------------------
     # Auto-update
@@ -783,6 +954,7 @@ class IronLogApp(ctk.CTk):
             # Extract raw day value (int = training day, str = special session)
             v = day_data.get("day")
             day_obj = v if isinstance(v, (int, str)) else None
+            mass = self._resolve_mass_for_date(date_str, getattr(sessions, "BODYMASS_LOG", {}))
 
             exercises_summary = []
             for ex_id, log in day_data.items():
@@ -794,26 +966,29 @@ class IronLogApp(ctk.CTk):
                 display_name = name[:24] + "…" if len(name) > 24 else name
 
                 n_sets = len(log.reps)
+                max_lift = max(log.mass) if log.mass else 0
+                
+                # Format reps
+                if len(set(log.reps)) == 1:
+                    reps_part = f"{n_sets} \u00d7 {log.reps[0]}"
+                else:
+                    reps_part = "-".join(str(r) for r in log.reps)
+
+                # Format mass
                 if log.mass and max(log.mass) > 0:
                     if len(set(log.mass)) == 1:
-                        if len(set(log.reps)) == 1:
-                            summary = f"{n_sets} \u00d7 {log.reps[0]} @ {log.mass[0]}kg"
-                        else:
-                            reps_str = "-".join(str(r) for r in log.reps)
-                            summary = f"{reps_str} @ {log.mass[0]}kg"
+                        mass_part = f" @ {log.mass[0]}kg"
                     else:
-                        avg = sum(log.mass) / len(log.mass)
-                        summary = f"{n_sets} sets ~{avg:.1f}kg"
+                        m_min, m_max = min(log.mass), max(log.mass)
+                        mass_part = f" @ {m_min}-{m_max}kg"
                 else:
-                    if len(set(log.reps)) == 1:
-                        summary = f"{n_sets}\u00d7{log.reps[0]} (BW)"
-                    else:
-                        reps_str = "-".join(str(r) for r in log.reps)
-                        summary = f"{reps_str} (BW)"
+                    mass_part = " (BW)"
+                    max_lift = mass if mass else 0
 
-                exercises_summary.append((display_name, summary))
+                summary = f"{reps_part}{mass_part}"
+                exercises_summary.append((ex_id, display_name, summary, max_lift))
 
-            display_data.append((date_str, day_obj, exercises_summary))
+            display_data.append((date_str, day_obj, exercises_summary, mass))
 
         # Check for profile mismatch
         owner = getattr(sessions, "SESSIONS_OWNER", None)
@@ -875,10 +1050,10 @@ class IronLogApp(ctk.CTk):
             row.columnconfigure(i, weight=1)
         row.rowconfigure(0, weight=1)
 
-        for col_i, (date_str, day_obj, exercises) in enumerate(data):
-            is_pr = isinstance(day_obj, str)
-
-            card_bg = "#2a1a00" if is_pr else "#1c1c1e"
+        for col_i, (date_str, day_obj, exercises, mass) in enumerate(data):
+            is_pr = isinstance(day_obj, str) and day_obj.upper() == "PR"
+            
+            card_bg = "#2a1a00" if isinstance(day_obj, str) else "#1c1c1e"
             hdr_fg = "#b45309" if is_pr else "#ffffff"
             sep_bg = "#5a3000" if is_pr else "#2e2e2e"
 
@@ -914,17 +1089,18 @@ class IronLogApp(ctk.CTk):
 
             # Exercise rows
             MAX_EX = 10
-            for ex_name, summary in exercises[:MAX_EX]:
+            for ex_id, ex_name, summary, lift in exercises[:MAX_EX]:
                 ex_row = tk.Frame(card, bg=card_bg)
                 ex_row.pack(fill="x", padx=12, pady=1)
-                tk.Label(
+                name_lbl = tk.Label(
                     ex_row,
                     text=ex_name,
                     bg=card_bg,
                     fg="#dddddd",
                     font=("Roboto", 12),
                     anchor="w",
-                ).pack(side="left")
+                )
+                name_lbl.pack(side="left")
                 tk.Label(
                     ex_row,
                     text=summary,
@@ -933,6 +1109,16 @@ class IronLogApp(ctk.CTk):
                     font=("Roboto", 11),
                     anchor="e",
                 ).pack(side="right")
+
+                # Bind tooltip
+                ExerciseToolTip(
+                    name_lbl,
+                    ex_id,
+                    self.manager.get_active_profile().sex,
+                    mass=mass,
+                    lift=lift,
+                    is_pr=is_pr,
+                )
 
             if len(exercises) > MAX_EX:
                 tk.Label(
