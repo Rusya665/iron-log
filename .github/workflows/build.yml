@@ -46,14 +46,9 @@ jobs:
         $VERSION = '${{ github.ref_name }}'.TrimStart('v')
         (Get-Content core/version.py) -replace '__version__ = ".*"', "__version__ = ""$VERSION""" | Set-Content core/version.py
 
-    - name: Install UPX
-      uses: crazy-max/ghaction-upx@v3
-      with:
-        install-only: true
-
     - name: Build with PyInstaller
       run: |
-        pyinstaller iron_log.spec --upx-dir ${{ env.UPX_INSTALL_DIR }}
+        pyinstaller iron_log.spec
 
     - name: Inject Version into Installer
       run: |
