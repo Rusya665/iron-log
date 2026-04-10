@@ -2,6 +2,8 @@ name: Build and Release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*' # Trigger on version tags, e.g., v1.0.0
 
@@ -50,11 +52,13 @@ jobs:
         path: installer/iron_log_setup.iss
 
     - name: Extract Tag Message
+      if: startsWith(github.ref, 'refs/tags/')
       shell: bash
       run: |
         git tag -l --format='%(contents)' ${{ github.ref_name }} > RELEASE_NOTES.md
 
     - name: Create Release and Upload Asset
+      if: startsWith(github.ref, 'refs/tags/')
       uses: softprops/action-gh-release@v2
       with:
         files: installer/Output/IronLog_Setup_*.exe
