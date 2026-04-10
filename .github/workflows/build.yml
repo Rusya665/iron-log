@@ -16,6 +16,8 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Set up Python
       uses: actions/setup-python@v5
@@ -48,18 +50,14 @@ jobs:
         path: installer/iron_log_setup.iss
 
     - name: Extract Tag Message
-      shell: pwsh
+      shell: bash
       run: |
-        $msg = git tag -l --format='%(contents)' ${{ github.ref_name }}
-        "TAG_BODY<<EOF" >> $env:GITHUB_ENV
-        $msg >> $env:GITHUB_ENV
-        "EOF" >> $env:GITHUB_ENV
+        git tag -l --format='%(contents)' ${{ github.ref_name }} > RELEASE_NOTES.md
 
     - name: Create Release and Upload Asset
       uses: softprops/action-gh-release@v2
       with:
         files: installer/Output/IronLog_Setup_*.exe
-        body: ${{ env.TAG_BODY }}
-        generate_release_notes: true
+        body_path: RELEASE_NOTES.md
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
