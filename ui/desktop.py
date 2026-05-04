@@ -34,6 +34,62 @@ ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 
+class SimpleToolTip:
+    """A generic tooltip for any widget."""
+    def __init__(self, widget, text):
+        self.widget = widget
+        self.text = text
+        self.tip_window = None
+        self.display_timer = None
+
+        self.widget.bind("<Enter>", self.on_enter, add="+")
+        self.widget.bind("<Leave>", self.on_leave, add="+")
+        self.widget.bind("<ButtonPress>", self.on_leave, add="+")
+
+    def on_enter(self, event=None):
+        self._cancel_timer()
+        self.display_timer = self.widget.after(500, self.show_tip)
+
+    def on_leave(self, event=None):
+        self._cancel_timer()
+        self.hide_tip()
+
+    def _cancel_timer(self):
+        if self.display_timer:
+            self.widget.after_cancel(self.display_timer)
+            self.display_timer = None
+
+    def show_tip(self):
+        if self.tip_window:
+            return
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.overrideredirect(True)
+        tw.wm_attributes("-topmost", True)
+        
+        x = self.widget.winfo_rootx() + 20
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        tw.geometry(f"+{x}+{y}")
+
+        container = tk.Frame(tw, bg="#1c1c1e", highlightthickness=1, highlightbackground="#333")
+        container.pack(padx=1, pady=1)
+
+        tk.Label(
+            container,
+            text=self.text,
+            bg="#1c1c1e",
+            fg="#aaa",
+            font=("Roboto", 11),
+            justify="left",
+            padx=8,
+            pady=4
+        ).pack()
+
+    def hide_tip(self):
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+
+
 class ExerciseToolTip:
     """
     A custom tooltip for exercises that shows strength standards on hover.
@@ -1892,6 +1948,26 @@ class DynamicPlanDialog(ctk.CTkToplevel):
             command=self._add_day,
         ).pack(side="left", padx=16, pady=12)
 
+        def _handle_experimental(val):
+            if val == "Deload Next Cycle":
+                self._prompt_deload()
+            # Reset the menu title
+            self.after(100, lambda: exp_menu.set("🧪 Experimental"))
+
+        exp_menu = ctk.CTkOptionMenu(
+            footer,
+            values=["Deload Next Cycle"],
+            command=_handle_experimental,
+            font=("Roboto", 13),
+            fg_color="#333",
+            button_color="#444",
+            button_hover_color="#555",
+            dropdown_font=("Roboto", 12),
+            width=160
+        )
+        exp_menu.set("🧪 Experimental")
+        exp_menu.pack(side="left", padx=16, pady=12)
+
         save_btn_text = (
             "✅ Save Split"
             if self._mode in ["initial", "post_pr"]
@@ -1911,6 +1987,41 @@ class DynamicPlanDialog(ctk.CTkToplevel):
 
         self._standards = EXERCISE_STANDARDS
 
+        self._build_content()
+
+    def _prompt_deload(self):
+        dialog = ctk.CTkInputDialog(text="Enter deload percentage (e.g., 10 for 10%):", title="Deload")
+        val = dialog.get_input()
+        if val is None:
+            return
+        try:
+            percent = float(val)
+            if percent <= 0 or percent >= 100:
+                messagebox.showerror("Error", "Percentage must be between 0 and 100")
+                return
+        except ValueError:
+            messagebox.showerror("Error", "Invalid number")
+            return
+            
+        self._save_state()
+        
+        factor = 1.0 - (percent / 100.0)
+        for ps in self._planned:
+            for ex in ps.exercises:
+                try:
+                    current_mass = float(ex.mass)
+                    if current_mass > 0:
+                        new_mass = current_mass * factor
+                        # round to nearest 2.5
+                        new_mass = round(new_mass / 2.5) * 2.5
+                        ex.mass = f"{new_mass:g}"
+                        if ex.comment:
+                            ex.comment += f" | {percent:g}% decreased deload"
+                        else:
+                            ex.comment = f"{percent:g}% decreased deload"
+                except ValueError:
+                    pass
+        
         self._build_content()
 
     def _remove_day(self, index):
@@ -2007,7 +2118,7 @@ class DynamicPlanDialog(ctk.CTkToplevel):
                 s_hdr, textvariable=date_var, width=110, height=28, font=("Roboto", 12)
             ).pack(side="left", padx=(0, 12))
 
-            ctk.CTkButton(
+            del_btn = ctk.CTkButton(
                 s_hdr,
                 text="🗑️",
                 width=34,
@@ -2015,7 +2126,9 @@ class DynamicPlanDialog(ctk.CTkToplevel):
                 fg_color="#5a1a1a",
                 hover_color="#c62828",
                 command=lambda idx=s_idx: self._remove_day(idx),
-            ).pack(side="right", padx=12)
+            )
+            del_btn.pack(side="right", padx=12)
+            SimpleToolTip(del_btn, "Remove Day")
 
             ctk.CTkButton(
                 s_hdr,
@@ -2205,7 +2318,7 @@ class DynamicPlanDialog(ctk.CTkToplevel):
             command=make_add_reps_cb(),
         ).pack(side="left", padx=2)
 
-        ctk.CTkButton(
+        del_ex_btn = ctk.CTkButton(
             ex_row,
             text="X",
             width=28,
@@ -2213,7 +2326,9 @@ class DynamicPlanDialog(ctk.CTkToplevel):
             fg_color="#c62828",
             hover_color="#b71c1c",
             command=lambda: self._fast_remove_exercise(ps, ex, ex_row),
-        ).pack(side="left", padx=2)
+        )
+        del_ex_btn.pack(side="left", padx=2)
+        SimpleToolTip(del_ex_btn, "Remove Exercise")
 
         self._widgets.append(
             (ps, ex, ex_row, name_v, sets_v, reps_v, mass_v, comment_v)
