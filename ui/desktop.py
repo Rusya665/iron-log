@@ -1951,12 +1951,14 @@ class DynamicPlanDialog(ctk.CTkToplevel):
         def _handle_experimental(val):
             if val == "Deload Next Cycle":
                 self._prompt_deload()
+            elif val == "Restore from Pre-Deload":
+                self._prompt_restore_pre_deload()
             # Reset the menu title
             self.after(100, lambda: exp_menu.set("🧪 Experimental"))
 
         exp_menu = ctk.CTkOptionMenu(
             footer,
-            values=["Deload Next Cycle"],
+            values=["Deload Next Cycle", "Restore from Pre-Deload"],
             command=_handle_experimental,
             font=("Roboto", 13),
             fg_color="#333",
@@ -2022,6 +2024,39 @@ class DynamicPlanDialog(ctk.CTkToplevel):
                 except ValueError:
                     pass
         
+        self._build_content()
+
+    def _prompt_restore_pre_deload(self):
+        """Rebuild the plan from the last non-deload cycle at full (100%) weight.
+        The user can then apply a deload via 'Deload Next Cycle' if desired."""
+        self._save_state()
+
+        day_numbers = [ps.day_number for ps in self._planned]
+        try:
+            from core.plan_generator import build_pre_deload_baseline
+
+            new_planned = build_pre_deload_baseline(
+                self._file_path, day_numbers, 100.0
+            )
+        except Exception as e:
+            messagebox.showerror("Error", f"Could not read pre-deload sessions:\n{e}")
+            return
+
+        # Check we actually found baseline data
+        total_exercises = sum(len(ps.exercises) for ps in new_planned)
+        if total_exercises == 0:
+            messagebox.showwarning(
+                "Nothing Found",
+                "No pre-deload sessions were found in sessions.py.\n"
+                "Make sure your normal sessions have no 'deload' in their comments.",
+            )
+            return
+
+        # Preserve dates the user may have already edited
+        for orig, fresh in zip(self._planned, new_planned):
+            fresh.date_str = orig.date_str
+
+        self._planned = new_planned
         self._build_content()
 
     def _remove_day(self, index):

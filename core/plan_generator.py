@@ -281,16 +281,178 @@ def _suggest_progression(reps: list, mass: list) -> dict:
     """Return an exact baseline copy from the previous session."""
     n_sets = len(reps)
 
-    reps_str = ", ".join(str(r) for r in reps)
+    def _fmt_rep(r):
+        """Format a rep value: whole-number floats become ints (6.0 → 6)."""
+        if isinstance(r, float) and r.is_integer():
+            return str(int(r))
+        return str(r)
+
+    reps_str = ", ".join(_fmt_rep(r) for r in reps)
     mass_str = ", ".join(f"{m:g}" if m > 0 else "0" for m in mass)
 
     # Simplify to single number if all sets are identical
     if len(set(reps)) == 1:
-        reps_str = str(reps[0])
+        reps_str = _fmt_rep(reps[0])
     if len(set(mass)) == 1:
         mass_str = f"{mass[0]:g}" if mass[0] > 0 else "0"
 
     return {"sets": n_sets, "reps": reps_str, "mass": mass_str}
+
+
+# ---------------------------------------------------------------------------
+# Pre-deload baseline: skip deload sessions and read the last clean cycle
+# ---------------------------------------------------------------------------
+
+_DELOAD_COMMENT_RE = re.compile(r"#.*deload", re.IGNORECASE)
+_LOG_LINE_RE = re.compile(
+    r"\s*(\w+)\s*:\s*Log\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)"
+)
+# Matches the opening line of a session block:  "2026-05-05": {  # Day 1
+_BLOCK_OPEN_RE = re.compile(
+    r'^([ \t]*)"(\d{4}-\d{2}-[^"]+)"\s*:\s*\{[^{]*#\s*[Dd]ay\s*(\d+)'
+)
+
+
+def _is_deload_block(block_lines: list[str]) -> bool:
+    """Return True if any exercise line in the block carries a 'deload' comment."""
+    return any(_DELOAD_COMMENT_RE.search(ln) for ln in block_lines)
+
+
+def build_pre_deload_baseline(
+    sessions_file_path: str,
+    day_numbers: List[int],
+    scale_pct: float,
+) -> List["PlannedSession"]:
+    """Build PlannedSession objects from the *last non-deload* cycle.
+
+    Algorithm
+    ---------
+    1. Parse sessions.py raw text into ordered ``(date, day_number, block_lines)``
+       tuples — most-recent first.
+    2. A block is considered a *deload block* if any exercise line contains
+       the word "deload" in its inline comment.
+    3. Walk backward; for each requested day number, take the **first block that
+       is NOT a deload block** as the pre-deload baseline.
+    4. Scale every mass by ``scale_pct / 100``, round to nearest 2.5 kg.
+    5. Preserve reps/sets exactly; reset comments to e.g. ``"85% of pre-deload"``.
+
+    Parameters
+    ----------
+    sessions_file_path:
+        Path to sessions.py.
+    day_numbers:
+        Day numbers to plan (e.g. ``[1, 2, 3]`` for a full 3-day cycle).
+    scale_pct:
+        Percentage of the pre-deload max to target (e.g. ``85`` for 85%).
+
+    Returns
+    -------
+    list[PlannedSession]
+    """
+    from core.standards import EXERCISE_STANDARDS
+
+    with open(sessions_file_path, "r", encoding="utf-8") as f:
+        lines = f.read().splitlines()
+
+    # -- load module for display-name + var_name resolution ------------------
+    import importlib, sys
+
+    sessions_dir = str(__import__("pathlib").Path(sessions_file_path).parent)
+    if sessions_dir not in sys.path:
+        sys.path.insert(0, sessions_dir)
+    import sessions as sess_mod
+    importlib.reload(sess_mod)
+
+    id_to_name = {
+        slug: info.get("name", slug) for slug, info in EXERCISE_STANDARDS.items()
+    }
+    var_to_id: dict[str, str] = {}
+    for attr in dir(sess_mod):
+        val = getattr(sess_mod, attr)
+        if (
+            isinstance(val, str)
+            and attr not in ("SESSIONS_OWNER", "USER_SEX")
+            and not attr.startswith("_")
+        ):
+            var_to_id[attr] = val
+
+    # -- parse raw blocks in chronological order then reverse ----------------
+    # Each entry: (date_str, day_number, raw_block_lines)
+    all_blocks: list[tuple[str, int, list[str]]] = []
+
+    line_idx = 0
+    while line_idx < len(lines):
+        line = lines[line_idx]
+        m = _BLOCK_OPEN_RE.match(line)
+        if m:
+            indent = m.group(1)
+            date_str = m.group(2)
+            dn = int(m.group(3))
+            block_lines: list[str] = []
+            idx2 = line_idx + 1
+            while idx2 < len(lines):
+                l2 = lines[idx2]
+                if l2.startswith(indent + "}") or l2.strip() == "},":
+                    all_blocks.append((date_str, dn, block_lines))
+                    break
+                block_lines.append(l2)
+                idx2 += 1
+            line_idx = idx2
+        else:
+            line_idx += 1
+
+    # Walk newest-first
+    all_blocks_rev = list(reversed(all_blocks))
+
+    # For each requested day, find the most recent NON-deload block
+    baseline: dict[int, list[str]] = {}
+    for date_str, dn, block_lines in all_blocks_rev:
+        if dn in day_numbers and dn not in baseline:
+            if not _is_deload_block(block_lines):
+                baseline[dn] = block_lines
+
+    suggested_dates = _next_date_after(sess_mod.USER_DATA, len(day_numbers))
+    label = "restored" if scale_pct == 100.0 else f"{scale_pct:g}% of pre-deload"
+
+    planned: List[PlannedSession] = []
+    for idx, dn in enumerate(day_numbers):
+        session = PlannedSession(
+            day_number=dn,
+            date_str=suggested_dates[idx],
+        )
+        block_lines = baseline.get(dn, [])
+        for raw_ln in block_lines:
+            lm = _LOG_LINE_RE.match(raw_ln)
+            if not lm:
+                continue
+            var_name = lm.group(1)
+            if var_name == "day":
+                continue
+            reps_list = [float(x.strip()) for x in lm.group(2).split(",")]
+            mass_list = [float(x.strip()) for x in lm.group(3).split(",")]
+
+            # Scale + round to nearest 2.5 kg (keep 0 as 0)
+            factor = scale_pct / 100.0
+            scaled_mass = [
+                round(m * factor / 2.5) * 2.5 if m > 0 else 0.0
+                for m in mass_list
+            ]
+
+            ex_id = var_to_id.get(var_name, var_name)
+            display = id_to_name.get(ex_id, var_name.replace("_", " ").title())
+            prog = _suggest_progression(reps_list, scaled_mass)
+
+            session.exercises.append(
+                PlannedExercise(
+                    var_name=var_name,
+                    display_name=display,
+                    comment=label,
+                    **prog,
+                )
+            )
+        planned.append(session)
+
+    return planned
 
 
 # ---------------------------------------------------------------------------
