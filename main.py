@@ -16,7 +16,7 @@ def run_cli(args):
     from core.xlsx_generator import TrainingLogProcessor
     from datetime import datetime
 
-    config = get_config(reconfigure=args.reconfigure)
+    config = get_config(reconfigure=args.reconfigure, cli_mode=True)
     sessions_dir = config.get("sessions_dir")
     output_dir = config.get("output_dir")
 

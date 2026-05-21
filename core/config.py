@@ -33,38 +33,59 @@ def detect_default_drive():
     return os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data"))
 
 
-def prompt_user_for_paths() -> dict:
+def prompt_user_for_paths(cli_mode: bool = False) -> dict:
     default_base = detect_default_drive()
 
-    # Hidden root for tkinter dialogs
-    root = tk.Tk()
-    root.withdraw()
+    if cli_mode:
+        # 1. Output Dir
+        default_output = os.path.join(default_base, "gym")
+        print(f"Selecting Excel output folder... [Default: {default_output}]")
+        output_dir = input(f"Enter path (or press Enter for default): ").strip()
+        if not output_dir:
+            output_dir = default_output
+            print(f"Using default: {output_dir}")
+        else:
+            print(f"Selected: {output_dir}")
 
-    # 1. Output Dir
-    default_output = os.path.join(default_base, "gym")
-    print(f"Selecting Excel output folder... [Default: {default_output}]")
-    output_dir = filedialog.askdirectory(
-        title="Select folder for Excel files", initialdir=default_base
-    )
-    if not output_dir:
-        output_dir = default_output
-        print(f"Using default: {output_dir}")
+        # 2. Sessions Dir
+        default_sessions = default_base
+        print(f"Selecting 'sessions.py' folder... [Default: {default_sessions}]")
+        sessions_dir = input(f"Enter path (or press Enter for default): ").strip()
+        if not sessions_dir:
+            sessions_dir = default_sessions
+            print(f"Using default: {sessions_dir}")
+        else:
+            print(f"Selected: {sessions_dir}")
     else:
-        print(f"Selected: {output_dir}")
+        # Hidden root for tkinter dialogs
+        root = tk.Tk()
+        root.withdraw()
 
-    # 2. Sessions Dir
-    default_sessions = default_base
-    print(f"Selecting 'sessions.py' folder... [Default: {default_sessions}]")
-    sessions_dir = filedialog.askdirectory(
-        title="Select folder containing sessions.py", initialdir=default_base
-    )
-    if not sessions_dir:
-        sessions_dir = default_sessions
-        print(f"Using default: {sessions_dir}")
-    else:
-        print(f"Selected: {sessions_dir}")
+        # 1. Output Dir
+        default_output = os.path.join(default_base, "gym")
+        print(f"Selecting Excel output folder... [Default: {default_output}]")
+        output_dir = filedialog.askdirectory(
+            title="Select folder for Excel files", initialdir=default_base
+        )
+        if not output_dir:
+            output_dir = default_output
+            print(f"Using default: {output_dir}")
+        else:
+            print(f"Selected: {output_dir}")
 
-    root.destroy()
+        # 2. Sessions Dir
+        default_sessions = default_base
+        print(f"Selecting 'sessions.py' folder... [Default: {default_sessions}]")
+        sessions_dir = filedialog.askdirectory(
+            title="Select folder containing sessions.py", initialdir=default_base
+        )
+        if not sessions_dir:
+            sessions_dir = default_sessions
+            print(f"Using default: {sessions_dir}")
+        else:
+            print(f"Selected: {sessions_dir}")
+
+        root.destroy()
 
     os.makedirs(sessions_dir, exist_ok=True)
     os.makedirs(output_dir, exist_ok=True)
@@ -72,7 +93,7 @@ def prompt_user_for_paths() -> dict:
     return {"sessions_dir": sessions_dir, "output_dir": output_dir}
 
 
-def get_config(reconfigure: bool = False) -> dict:
+def get_config(reconfigure: bool = False, cli_mode: bool = False) -> dict:
     if not reconfigure and os.path.exists(CONFIG_FILE):
         with open(CONFIG_FILE, "r") as f:
             try:
@@ -82,7 +103,7 @@ def get_config(reconfigure: bool = False) -> dict:
             except json.JSONDecodeError:
                 pass
 
-    config = prompt_user_for_paths()
+    config = prompt_user_for_paths(cli_mode=cli_mode)
 
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)

@@ -34,9 +34,14 @@ def calc_brzycki(d: Log) -> float:
     if not d.reps:
         return 0
     if d.mass and max(d.mass) == 0:
-        return max(d.reps)
+        valid_reps = [r for r in d.reps if r > 0]
+        return max(valid_reps) if valid_reps else 0
 
-    one_rms = [m * (36 / (37 - r)) if r < 37 else m for r, m in zip(d.reps, d.mass)]
+    one_rms = [
+        m * (36 / (37 - r)) if r < 37 else m
+        for r, m in zip(d.reps, d.mass)
+        if r > 0
+    ]
     return max(one_rms) if one_rms else 0
 
 

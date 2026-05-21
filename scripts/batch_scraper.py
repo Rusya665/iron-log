@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 # Correct paths relative to script location
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STANDARDS_FILE = os.path.join(BASE_DIR, "core", "standards.py")
+STANDARDS_TMP_FILE = STANDARDS_FILE + ".tmp"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -84,9 +85,9 @@ def get_exercise_standard(exercise_id: str, target_date_str: str, bodymass_log: 
 # Consolidate exercise standards database
 EXERCISE_STANDARDS = {
 """
-    with open(STANDARDS_FILE, "w", encoding="utf-8") as f:
+    with open(STANDARDS_TMP_FILE, "w", encoding="utf-8") as f:
         f.write(content)
-    print("Reset standards.py to core logic and header.")
+    print("Reset standards.py.tmp to core logic and header.")
 
 
 def get_all_exercise_slugs():
@@ -244,9 +245,9 @@ def finalize_standards_file():
         var_name = re.sub(r"_+", "_", var_name)
         lines.append(f"{var_name} = '{slug}'")
 
-    with open(STANDARDS_FILE, "a", encoding="utf-8") as f:
+    with open(STANDARDS_TMP_FILE, "a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    print(f"Finalized standards.py with {len(EXERCISE_LIBRARY_ACCUMULATOR)} constants.")
+    print(f"Finalized standards.py.tmp with {len(EXERCISE_LIBRARY_ACCUMULATOR)} constants.")
 
 
 def append_to_standards_dict(slug: str, gender_results: dict):
@@ -271,7 +272,7 @@ def append_to_standards_dict(slug: str, gender_results: dict):
 
     lines.append("    },")
 
-    with open(STANDARDS_FILE, "a", encoding="utf-8") as f:
+    with open(STANDARDS_TMP_FILE, "a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print(f"Saved: {slug} ('{name}')")
 
@@ -298,6 +299,11 @@ if __name__ == "__main__":
         time.sleep(1.0)
 
     finalize_standards_file()
+    if os.path.exists(STANDARDS_TMP_FILE):
+        os.replace(STANDARDS_TMP_FILE, STANDARDS_FILE)
+        print("Updated standards.py atomically.")
+    else:
+        print("Error: Temporary standards file not found. Could not update.")
     print("\nScrape Finished!")
     print(f"Success: {success_count}")
     print(f"Failed: {fail_count}")

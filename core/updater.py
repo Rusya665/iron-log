@@ -73,7 +73,7 @@ del "{exe_path}"
 del "%~f0"
 """
         bat_path = os.path.join(temp_dir, "ironlog_install_update.bat")
-        with open(bat_path, "w") as f:
+        with open(bat_path, "w", encoding="ansi") as f:
             f.write(bat_content)
 
         # 3. Launch the batch script detached, without a console window
