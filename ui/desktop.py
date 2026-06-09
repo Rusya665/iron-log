@@ -682,9 +682,38 @@ class IronLogApp(ctk.CTk):
 
         def browse_sessions():
             path = ctk.filedialog.askdirectory()
-            if path:
-                sessions_entry.delete(0, "end")
-                sessions_entry.insert(0, path)
+            if not path:
+                return
+            sessions_entry.delete(0, "end")
+            sessions_entry.insert(0, path)
+
+            # ── Immediate folder validation on Browse ─────────────────────────
+            current_name = name_entry.get().strip()
+            sessions_file = os.path.join(path, "sessions.py")
+            if os.path.exists(sessions_file):
+                from core.plan_generator import detect_sessions_owner
+                existing_owner = detect_sessions_owner(sessions_file)
+                if existing_owner and existing_owner.strip().lower() != current_name.lower():
+                    msg = (
+                        f"This folder already contains data belonging to '{existing_owner}'.\n\n"
+                        f"Choose 'Yes' to continue as '{existing_owner}' (uses existing data).\n"
+                        f"Choose 'No' to START FRESH for '{current_name or 'new user'}' "
+                        f"(overwrites existing data).\n"
+                        f"Choose 'Cancel' to pick a different folder."
+                    )
+                    res = messagebox.askyesnocancel("Folder Already in Use", msg)
+                    if res is None:  # Cancel — clear the field
+                        sessions_entry.delete(0, "end")
+                        return
+                    if res is True:  # Continue as existing owner
+                        # Populate name field with the real owner name
+                        name_entry.delete(0, "end")
+                        name_entry.insert(0, existing_owner)
+                        validation_label.configure(
+                            text=f"ℹ️  Name updated to match existing owner '{existing_owner}'",
+                            text_color="#90caf9",
+                        )
+                    # res is False → user chose Start Fresh; leave path set, name unchanged
 
         ctk.CTkButton(form, text="Browse", width=60, command=browse_sessions).grid(
             row=2, column=2, padx=10
@@ -715,8 +744,9 @@ class IronLogApp(ctk.CTk):
                 if existing_owner and existing_owner.strip().lower() != name.lower():
                     msg = (
                         f"This folder already contains data belonging to '{existing_owner}'.\n\n"
-                        f"Choose 'Yes' to use this data as your own.\n"
-                        f"Choose 'No' to START FRESH (this will overwrite modern data for {name}).\n"
+                        f"Choose 'Yes' to continue as '{existing_owner}' (uses existing data).\n"
+                        f"Choose 'No' to START FRESH for '{name}' "
+                        f"(this will overwrite existing data).\n"
                         f"Choose 'Cancel' to pick a different folder."
                     )
                     res = messagebox.askyesnocancel("Folder Already in Use", msg)
@@ -739,8 +769,7 @@ class IronLogApp(ctk.CTk):
                             return
                         else:
                             return
-                    # if True (Yes), we fall through and use the existing owner's name
-                    # to ensure the profile name matches SESSIONS_OWNER in sessions.py.
+                    # if True (Yes / Continue as existing owner), adopt that name
                     name = existing_owner
 
             elif not os.path.exists(sessions_file):
@@ -2073,11 +2102,12 @@ class DynamicPlanDialog(ctk.CTkToplevel):
         from core.plan_generator import PlannedSession
 
         dn = len(self._planned) + 1
-        base_date = datetime.now().strftime("%Y-%m-%d")
-        if self._planned:
-            base_date = self._planned[-1].date_str
+        # Generate a YYYY-MM placeholder with literal "DD" so the user is forced
+        # to fill in the exact date before saving — prevents accidental duplicates.
+        now = datetime.now()
+        placeholder_date = now.strftime("%Y-%m-DD")
         self._planned.append(
-            PlannedSession(day_number=dn, date_str=base_date, exercises=[])
+            PlannedSession(day_number=dn, date_str=placeholder_date, exercises=[])
         )
         self._build_content()
 
@@ -2492,6 +2522,20 @@ class DynamicPlanDialog(ctk.CTkToplevel):
 
     def _on_confirm(self):
         self._save_state()
+
+        # Date validation: reject placeholder "YYYY-MM-DD" dates where DD is literal
+        import re as _re
+        for ps in self._planned:
+            if _re.search(r"-DD$", ps.date_str):
+                import tkinter.messagebox as mb
+                mb.showerror(
+                    "Incomplete Date",
+                    f"Day {ps.day_number} still has a placeholder date "
+                    f"'{ps.date_str}'.\n\nPlease replace 'DD' with the exact day number "
+                    f"before saving (e.g. {ps.date_str[:-2]}14).",
+                    parent=self,
+                )
+                return
 
         # Validation
         for s_idx, ps in enumerate(self._planned):

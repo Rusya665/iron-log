@@ -176,6 +176,10 @@ def build_planned_sessions(
             baseline[dn] = day_data
 
     if len(baseline) < len(day_numbers):
+        # Only match uncommented block openers — commented-out sessions are
+        # intentionally excluded.  detect_cycle() already derives N from
+        # USER_DATA (which never contains commented entries), so the cycle
+        # length is always inferred from real, active sessions.
         pattern = re.compile(
             r'^([ \t]*)"(\d{4})-[^"]+"\s*:\s*\{[^{]*#\s*[Dd]ay\s*(\d+)'
         )
