@@ -698,3 +698,158 @@ def detect_sessions_owner(file_path: str) -> Optional[str]:
     except Exception:
         pass
     return None
+
+
+def get_deload_dates(sessions_file_path: str) -> set:
+    """Scan sessions.py file for sessions marked with the word 'deload' in comments."""
+    if not sessions_file_path or not os.path.exists(sessions_file_path):
+        return set()
+    
+    import re
+    date_re = re.compile(r'^\s*"(\d{4}-\d{2}-\d{2})"\s*:\s*\{')
+    deload_re = re.compile(r'#.*deload', re.IGNORECASE)
+    
+    deload_dates = set()
+    current_date = None
+    
+    try:
+        with open(sessions_file_path, "r", encoding="utf-8") as f:
+            for line in f:
+                match = date_re.match(line)
+                if match:
+                    current_date = match.group(1)
+                elif current_date:
+                    if deload_re.search(line):
+                        deload_dates.add(current_date)
+                    if line.strip() in ("},", "}"):
+                        current_date = None
+    except Exception:
+        pass
+        
+    return deload_dates
+
+
+def calculate_gym_stats(user_data: dict) -> dict:
+    """Calculate gym attendance metrics and active split duration from USER_DATA."""
+    from datetime import datetime
+    import re
+    import sys
+    from core.models import Log
+
+    # Parse deload dates if we can resolve sessions.py
+    deload_dates = set()
+    if "sessions" in sys.modules:
+        sessions_file = sys.modules["sessions"].__file__
+        deload_dates = get_deload_dates(sessions_file)
+
+    date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    sorted_dates = sorted([k for k in user_data.keys() if date_pattern.match(k)])
+    
+    total_days = len(sorted_dates)
+    
+    now = datetime.now()
+    curr_year_str = f"{now.year:04d}"
+    curr_month_str = f"{now.year:04d}-{now.month:02d}"
+    
+    this_year_days = sum(1 for d in sorted_dates if d.startswith(curr_year_str))
+    this_month_days = sum(1 for d in sorted_dates if d.startswith(curr_month_str))
+    
+    latest_workout_date = sorted_dates[-1] if sorted_dates else "N/A"
+    latest_workout_day = user_data[latest_workout_date].get("day", "N/A") if sorted_dates else "N/A"
+
+    training_sessions = []
+    for d_str in sorted_dates:
+        day_data = user_data[d_str]
+        v = day_data.get("day")
+        if isinstance(v, int):
+            exercises = {ex_id for ex_id, val in day_data.items() if isinstance(val, Log)}
+            training_sessions.append({
+                "date": datetime.strptime(d_str, "%Y-%m-%d"),
+                "date_str": d_str,
+                "day": v,
+                "exercises": exercises
+            })
+            
+    current_split_weeks = 0.0
+    current_split_start = "N/A"
+    cycle_length = None
+    split_days_exercises = {}
+    split_sessions_details = []
+    
+    if training_sessions:
+        # Detect cycle length for current split
+        N, _ = detect_cycle(user_data)
+        cycle_length = N
+        
+        # Build reference map from latest sessions of this block
+        ref_map = {}
+        i = len(training_sessions) - 1
+        scan_idx = i
+        detected_days = []
+        while scan_idx >= 0:
+            s = training_sessions[scan_idx]
+            d = s["day"]
+            if d not in ref_map:
+                ref_map[d] = s["exercises"]
+                detected_days.append(d)
+            else:
+                if d in detected_days:
+                    break
+            scan_idx -= 1
+            
+        def jaccard_similarity(set1, set2):
+            if not set1 or not set2:
+                return 0.0
+            return len(set1.intersection(set2)) / len(set1.union(set2))
+            
+        split_start_idx = i
+        while i >= 0:
+            s = training_sessions[i]
+            d_str = s["date_str"]
+            if d_str in deload_dates:
+                # Stop if we hit a deload session
+                break
+            d = s["day"]
+            if d not in ref_map:
+                break
+            similarity = jaccard_similarity(s["exercises"], ref_map[d])
+            if similarity < 0.50:
+                break
+            split_start_idx = i
+            i -= 1
+            
+        split_start_session = training_sessions[split_start_idx]
+        split_end_session = training_sessions[-1]
+        
+        duration_days = (split_end_session["date"] - split_start_session["date"]).days
+        current_split_weeks = max(0.0, duration_days / 7.0)
+        current_split_start = split_start_session["date_str"]
+        
+        # Populate exercise structure and sessions details for the GUI detail popup
+        from core.standards import EXERCISE_STANDARDS
+        id_to_name = {slug: info.get("name", slug) for slug, info in EXERCISE_STANDARDS.items()}
+        
+        raw_split_days_ex = {}
+        for s in training_sessions[split_start_idx:]:
+            d = s["day"]
+            raw_split_days_ex.setdefault(d, set()).update(s["exercises"])
+            
+        split_days_exercises = {}
+        for d, ex_set in raw_split_days_ex.items():
+            split_days_exercises[d] = sorted([id_to_name.get(ex, ex) for ex in ex_set])
+            
+        split_sessions_details = [{"date": s["date_str"], "day": s["day"]} for s in training_sessions[split_start_idx:]]
+        
+    return {
+        "total_days": total_days,
+        "this_year_days": this_year_days,
+        "this_month_days": this_month_days,
+        "current_split_weeks": current_split_weeks,
+        "current_split_start": current_split_start,
+        "cycle_length": cycle_length,
+        "latest_workout_date": latest_workout_date,
+        "latest_workout_day": latest_workout_day,
+        "split_days_exercises": split_days_exercises,
+        "split_sessions_dates": split_sessions_details
+    }
+

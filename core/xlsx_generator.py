@@ -1222,7 +1222,7 @@ class TrainingLogProcessor:
             chart_pos_y += self._pixels_to_rows(h_indiv) + 2
 
     def write_user_profile(self):
-        self.ws_user_profile.set_column(0, 0, 20)
+        self.ws_user_profile.set_column(0, 0, 25)
         self.ws_user_profile.set_column(1, 1, 40)
 
         self.ws_user_profile.write(0, 0, "Personal Data", self.style_def_header)
@@ -1253,6 +1253,27 @@ class TrainingLogProcessor:
         for i, (label, value) in enumerate(fields, start=1):
             self.ws_user_profile.write(i, 0, label, self.style_def_text)
             self.ws_user_profile.write(i, 1, value, self.style_def_text)
+
+        # Gym stats
+        from core.plan_generator import calculate_gym_stats
+        stats = calculate_gym_stats(self.user_data)
+        
+        start_row = len(fields) + 3
+        self.ws_user_profile.write(start_row, 0, "Gym Statistics", self.style_def_header)
+        self.ws_user_profile.write(start_row, 1, "", self.style_def_header)
+
+        gym_fields = [
+            ("Total Gym Days", stats["total_days"]),
+            ("Gym Days (This Year)", stats["this_year_days"]),
+            ("Gym Days (This Month)", stats["this_month_days"]),
+            ("Current Split Duration", f"{stats['current_split_weeks']:.1f} Weeks"),
+            ("Current Split Start", stats["current_split_start"]),
+            ("Current Split Cycle", f"{stats['cycle_length'] or 'N/A'}-Day Split"),
+        ]
+
+        for j, (label, value) in enumerate(gym_fields, start=start_row + 1):
+            self.ws_user_profile.write(j, 0, label, self.style_def_text)
+            self.ws_user_profile.write(j, 1, value, self.style_def_text)
 
     def save(self):
         """Close and write the workbook to disk.

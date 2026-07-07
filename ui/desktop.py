@@ -967,6 +967,10 @@ class IronLogApp(ctk.CTk):
             ).start(),
         ).pack(side="right")
 
+        # Stats panel
+        self._stats_panel = ctk.CTkFrame(content, fg_color="transparent")
+        self._stats_panel.pack(fill="x", pady=(0, 14))
+
         # Cards area — plain frame, no canvas overhead
         self._sessions_panel = ctk.CTkFrame(content, fg_color="transparent")
         self._sessions_panel.pack(fill="both", expand=True)
@@ -1079,14 +1083,19 @@ class IronLogApp(ctk.CTk):
         owner = getattr(sessions, "SESSIONS_OWNER", None)
         is_mismatch = owner and owner.strip().lower() != p.name.lower()
 
+        from core.plan_generator import calculate_gym_stats
+        stats = calculate_gym_stats(sessions.USER_DATA)
+
         self.after(
             0,
-            lambda d=display_data: self._update_sessions_panel(
-                d, last_day_obj, mismatch_owner=owner if is_mismatch else None
+            lambda d=display_data, s=stats: self._update_sessions_panel(
+                d, last_day_obj, mismatch_owner=owner if is_mismatch else None, stats=s
             ),
         )
 
-    def _update_sessions_panel(self, data, last_day_obj=None, mismatch_owner=None):
+    def _update_sessions_panel(
+        self, data, last_day_obj=None, mismatch_owner=None, stats=None
+    ):
         """Main-thread callback: rebuild the recent sessions as horizontal cards.
 
         Uses ONLY native tk widgets (tk.Frame / tk.Label) — zero CTk canvas
@@ -1094,6 +1103,8 @@ class IronLogApp(ctk.CTk):
         """
         if not hasattr(self, "_sessions_panel"):
             return
+
+        self._update_stats_panel(stats)
         for w in self._sessions_panel.winfo_children():
             w.destroy()
 
@@ -1216,6 +1227,202 @@ class IronLogApp(ctk.CTk):
                 ).pack(fill="x", padx=14, pady=(4, 8))
             else:
                 tk.Frame(card, bg=card_bg, height=8).pack()
+
+    def _update_stats_panel(self, stats):
+        if not hasattr(self, "_stats_panel"):
+            return
+
+        for w in self._stats_panel.winfo_children():
+            w.destroy()
+
+        if not stats:
+            return
+
+        # Draw 3 cards side-by-side using grid
+        self._stats_panel.columnconfigure(0, weight=1)
+        self._stats_panel.columnconfigure(1, weight=1)
+        self._stats_panel.columnconfigure(2, weight=1)
+
+        card_p = {
+            "fg_color": "#1c1c1e",
+            "border_color": "#2e2e2e",
+            "border_width": 1,
+            "corner_radius": 10
+        }
+
+        # Card 1: Gym Attendance
+        c1 = ctk.CTkFrame(self._stats_panel, **card_p)
+        c1.grid(row=0, column=0, padx=6, pady=2, sticky="nsew")
+
+        ctk.CTkLabel(
+            c1, text="GYM ATTENDANCE", font=("Roboto", 10, "bold"), text_color="#777"
+        ).pack(anchor="w", padx=14, pady=(12, 2))
+        ctk.CTkLabel(
+            c1, text=f"{stats['total_days']} Days", font=("Roboto", 24, "bold"), text_color="white"
+        ).pack(anchor="w", padx=14, pady=0)
+        ctk.CTkLabel(
+            c1,
+            text=f"{stats['this_year_days']} this year · {stats['this_month_days']} this month",
+            font=("Roboto", 11),
+            text_color="#555",
+        ).pack(anchor="w", padx=14, pady=(0, 12))
+
+        # Card 2: Current Split Duration
+        c2 = ctk.CTkFrame(self._stats_panel, **card_p, cursor="hand2")
+        c2.grid(row=0, column=1, padx=6, pady=2, sticky="nsew")
+
+        split_duration_text = f"{stats['current_split_weeks']:.1f} Weeks"
+        split_subtext = f"{stats['cycle_length'] or 'N/A'}-Day Split · started {stats['current_split_start']}"
+
+        lbl_title = ctk.CTkLabel(
+            c2, text="CURRENT SPLIT DURATION", font=("Roboto", 10, "bold"), text_color="#777", cursor="hand2"
+        )
+        lbl_title.pack(anchor="w", padx=14, pady=(12, 2))
+        
+        lbl_dur = ctk.CTkLabel(
+            c2, text=split_duration_text, font=("Roboto", 24, "bold"), text_color="white", cursor="hand2"
+        )
+        lbl_dur.pack(anchor="w", padx=14, pady=0)
+        
+        lbl_sub = ctk.CTkLabel(
+            c2, text=split_subtext, font=("Roboto", 11), text_color="#555", cursor="hand2"
+        )
+        lbl_sub.pack(anchor="w", padx=14, pady=(0, 12))
+
+        # Event bindings for Click & Hover highlighting
+        def on_split_click(event):
+            self.show_split_details_popup(stats)
+
+        def on_enter(event):
+            c2.configure(fg_color="#2c2c2e")
+
+        def on_leave(event):
+            c2.configure(fg_color="#1c1c1e")
+
+        for widget in (c2, lbl_title, lbl_dur, lbl_sub):
+            widget.bind("<Button-1>", on_split_click)
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+
+        # Card 3: Last Workout
+        c3 = ctk.CTkFrame(self._stats_panel, **card_p)
+        c3.grid(row=0, column=2, padx=6, pady=2, sticky="nsew")
+
+        latest_date = stats.get("latest_workout_date", "N/A")
+        latest_day = stats.get("latest_workout_day", "N/A")
+        latest_subtext = f"Day {latest_day}" if isinstance(latest_day, int) else str(latest_day)
+
+        ctk.CTkLabel(
+            c3, text="LAST WORKOUT", font=("Roboto", 10, "bold"), text_color="#777"
+        ).pack(anchor="w", padx=14, pady=(12, 2))
+        ctk.CTkLabel(
+            c3, text=latest_date, font=("Roboto", 24, "bold"), text_color="white"
+        ).pack(anchor="w", padx=14, pady=0)
+        ctk.CTkLabel(
+            c3, text=latest_subtext, font=("Roboto", 11), text_color="#555"
+        ).pack(anchor="w", padx=14, pady=(0, 12))
+
+    def show_split_details_popup(self, stats):
+        if not stats:
+            return
+
+        popup = ctk.CTkToplevel(self)
+        popup.title("Current Split Details")
+        popup.geometry("650x550")
+        popup.resizable(False, False)
+        popup.after(100, popup.focus_force)
+        popup.after(100, popup.lift)
+
+        main_frame = ctk.CTkFrame(popup, fg_color="transparent")
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        ctk.CTkLabel(
+            main_frame,
+            text="Current Training Split Details",
+            font=("Roboto", 20, "bold"),
+            text_color="white"
+        ).pack(anchor="w", pady=(0, 10))
+
+        ctk.CTkFrame(main_frame, height=2, fg_color="#2e2e2e").pack(fill="x", pady=(0, 15))
+
+        layout_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        layout_frame.pack(fill="both", expand=True)
+        layout_frame.columnconfigure(0, weight=3)
+        layout_frame.columnconfigure(1, weight=2)
+        layout_frame.rowconfigure(0, weight=1)
+
+        left_col = ctk.CTkFrame(layout_frame, fg_color="transparent")
+        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        
+        ctk.CTkLabel(
+            left_col, text="Routine Structure", font=("Roboto", 14, "bold"), text_color="#1565C0"
+        ).pack(anchor="w", pady=(0, 8))
+
+        scroll_left = ctk.CTkScrollableFrame(left_col, fg_color="#121212", border_color="#2e2e2e", border_width=1)
+        scroll_left.pack(fill="both", expand=True)
+
+        split_ex = stats.get("split_days_exercises", {})
+        for day_num in sorted(split_ex.keys()):
+            day_frame = ctk.CTkFrame(scroll_left, fg_color="#1c1c1e", corner_radius=8)
+            day_frame.pack(fill="x", pady=4, padx=2)
+            
+            ctk.CTkLabel(
+                day_frame, text=f"Day {day_num}", font=("Roboto", 12, "bold"), text_color="#DAEEF3"
+            ).pack(anchor="w", padx=12, pady=(8, 2))
+            
+            for ex_name in split_ex[day_num]:
+                ctk.CTkLabel(
+                    day_frame, text=f"• {ex_name}", font=("Roboto", 11), text_color="#bbb"
+                ).pack(anchor="w", padx=20, pady=1)
+            
+            ctk.CTkFrame(day_frame, height=4, fg_color="transparent").pack()
+
+        right_col = ctk.CTkFrame(layout_frame, fg_color="transparent")
+        right_col.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
+
+        ctk.CTkLabel(
+            right_col, text="Sessions History (Skipping Deloads)", font=("Roboto", 14, "bold"), text_color="#6A1B9A"
+        ).pack(anchor="w", pady=(0, 8))
+
+        scroll_right = ctk.CTkScrollableFrame(right_col, fg_color="#121212", border_color="#2e2e2e", border_width=1)
+        scroll_right.pack(fill="both", expand=True)
+
+        dates_history = stats.get("split_sessions_dates", [])
+        for entry in reversed(dates_history):
+            date_str = entry["date"]
+            d_val = entry["day"]
+            lbl_text = f"📅  {date_str}  ·  Day {d_val}"
+            
+            date_frame = ctk.CTkFrame(scroll_right, fg_color="#1c1c1e", height=32)
+            date_frame.pack(fill="x", pady=2, padx=2)
+            date_frame.pack_propagate(False)
+            
+            ctk.CTkLabel(
+                date_frame, text=lbl_text, font=("Roboto", 11), text_color="#ccc"
+            ).pack(side="left", padx=10)
+
+        ctk.CTkFrame(main_frame, height=1, fg_color="#2e2e2e").pack(fill="x", pady=15)
+        
+        footer_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
+        footer_frame.pack(fill="x")
+        
+        summary_text = (
+            f"Active since: {stats['current_split_start']}  •  "
+            f"Duration: {stats['current_split_weeks']:.1f} Weeks  •  "
+            f"Total sessions: {len(dates_history)}"
+        )
+        ctk.CTkLabel(
+            footer_frame, text=summary_text, font=("Roboto", 11, "bold"), text_color="#888"
+        ).pack(side="left")
+
+        ctk.CTkButton(
+            footer_frame,
+            text="Close",
+            width=100,
+            fg_color="#333",
+            hover_color="#444",
+            command=popup.destroy
+        ).pack(side="right")
 
     def show_exercise_library(self):
         from core.standards import EXERCISE_STANDARDS

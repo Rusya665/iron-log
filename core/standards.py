@@ -27,17 +27,34 @@ def get_exercise_standard(
     if not dates:
         return 0
 
-    applicable_date = dates[0]
-    for d in dates:
+    # Find the closest date <= target_date_str that has a valid (non-None, non-zero) mass
+    applicable_date = None
+    for d in reversed(dates):
         if d <= target_date_str:
-            applicable_date = d
-        else:
-            break
+            bm_data = bodymass_log[d]
+            bm = bm_data if isinstance(bm_data, (int, float)) else (bm_data.get("mass") or bm_data.get("weight"))
+            if bm is not None and bm > 0:
+                applicable_date = d
+                break
+
+    if not applicable_date:
+        # Fallback to the first date with a valid bodyweight
+        for d in dates:
+            bm_data = bodymass_log[d]
+            bm = bm_data if isinstance(bm_data, (int, float)) else (bm_data.get("mass") or bm_data.get("weight"))
+            if bm is not None and bm > 0:
+                applicable_date = d
+                break
+
+    if not applicable_date:
+        return 0
 
     bm_data = bodymass_log[applicable_date]
     current_bm = (
-        bm_data if isinstance(bm_data, (int, float)) else bm_data.get("mass", 0)
+        bm_data if isinstance(bm_data, (int, float)) else bm_data.get("mass")
     )
+    if current_bm is None:
+        current_bm = bm_data.get("weight", 0) if isinstance(bm_data, dict) else 0
 
     if not current_bm:
         return 0
