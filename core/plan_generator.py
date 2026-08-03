@@ -16,6 +16,13 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 
 # ---------------------------------------------------------------------------
+# Pre-compiled Regex Patterns for Performance
+# ---------------------------------------------------------------------------
+_NON_ALPHANUM_RE = re.compile(r"\W+")
+_ASSIGNMENT_RE = re.compile(r"^([a-zA-Z_]\w*)\s*=", re.MULTILINE)
+
+
+# ---------------------------------------------------------------------------
 # Data structures returned to the UI
 # ---------------------------------------------------------------------------
 
@@ -94,11 +101,16 @@ def days_to_generate(N: int, last_day: int) -> List[int]:
 
 def _next_date_after(user_data: dict, n_sessions: int) -> List[str]:
     """Return n_sessions placeholder dates starting 2 days after the last entry."""
-    if not user_data:
+    date_pat = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    valid_dates = [k for k in user_data.keys() if date_pat.match(str(k))]
+    if not valid_dates:
         base = datetime.today()
     else:
-        last = max(user_data.keys())
-        base = datetime.strptime(last, "%Y-%m-%d")
+        last = max(valid_dates)
+        try:
+            base = datetime.strptime(last, "%Y-%m-%d")
+        except ValueError:
+            base = datetime.today()
 
     dates = []
     candidate = base + timedelta(days=2)
@@ -460,6 +472,142 @@ def build_pre_deload_baseline(
 
 
 # ---------------------------------------------------------------------------
+# Exercise variable resolution & missing exercise check
+# ---------------------------------------------------------------------------
+
+
+def resolve_exercise_vars(
+    sessions_file_path: str, raw_names: List[str]
+) -> Tuple[dict, List[str]]:
+    """Resolve raw exercise names from UI input against existing variable definitions in sessions.py.
+
+    Returns
+    -------
+    (resolved_map, missing_slugs):
+        - resolved_map: Dict[raw_name, exact_var_name_to_use]
+        - missing_slugs: List of slugs for exercises genuinely absent from sessions.py
+    """
+    import os
+
+    var_to_id: dict = {}
+    defined_vars: set = set()
+
+    sessions_dir = str(__import__("pathlib").Path(sessions_file_path).parent)
+    import sys
+
+    if sessions_dir not in sys.path:
+        sys.path.insert(0, sessions_dir)
+
+    try:
+        import importlib
+        import sessions as sess_mod
+
+        importlib.reload(sess_mod)
+
+        for attr in dir(sess_mod):
+            val = getattr(sess_mod, attr)
+            if (
+                isinstance(val, str)
+                and attr not in ("SESSIONS_OWNER", "USER_SEX")
+                and not attr.startswith("_")
+            ):
+                var_to_id[attr] = val
+                defined_vars.add(attr)
+    except Exception:
+        pass
+
+    if os.path.exists(sessions_file_path):
+        with open(sessions_file_path, "r", encoding="utf-8") as f:
+            content = f.read()
+        for match in _ASSIGNMENT_RE.finditer(content):
+            vname = match.group(1)
+            if vname not in (
+                "USER_DATA",
+                "BODYMASS_LOG",
+                "EXERCISE_REGISTRY",
+                "SESSIONS_OWNER",
+                "USER_SEX",
+                "day",
+            ):
+                defined_vars.add(vname)
+
+    resolved_map: dict = {}
+    missing_slugs: List[str] = []
+    seen_missing = set()
+
+    for raw in raw_names:
+        raw_trimmed = raw.strip()
+        if not raw_trimmed:
+            continue
+
+        slug = _NON_ALPHANUM_RE.sub("_", raw_trimmed.lower()).strip("_")
+        if not slug:
+            slug = "exercise"
+        if slug[0].isdigit():
+            slug = "_" + slug
+
+        # 1. Exact match with defined variable (e.g. "squat")
+        if raw_trimmed in defined_vars:
+            resolved_map[raw] = raw_trimmed
+            continue
+
+        # 2. Case-insensitive / slug match with defined variable (e.g. "Shoulder Press" -> "shoulder_press")
+        match_var = None
+        for dvar in defined_vars:
+            if dvar.lower() == slug:
+                match_var = dvar
+                break
+
+        if match_var:
+            resolved_map[raw] = match_var
+            continue
+
+        # 3. Match via var_to_id (e.g. raw "pull_up" matches defined var "pull_ups")
+        for dvar, ex_id in var_to_id.items():
+            ex_id_slug = re.sub(r"\W+", "_", str(ex_id).lower()).strip("_")
+            if slug == ex_id_slug or slug + "s" == ex_id_slug or slug == ex_id_slug + "s":
+                match_var = dvar
+                break
+
+        if match_var:
+            resolved_map[raw] = match_var
+            continue
+
+        # 4. Singular/plural match against defined_vars (e.g. "pull_up" matching "pull_ups")
+        for dvar in defined_vars:
+            dl = dvar.lower()
+            if slug == dl + "s" or slug + "s" == dl:
+                match_var = dvar
+                break
+
+        if match_var:
+            resolved_map[raw] = match_var
+            continue
+
+        # If not matched to any existing variable:
+        resolved_map[raw] = slug
+        if slug not in seen_missing and slug not in [v.lower() for v in defined_vars]:
+            seen_missing.add(slug)
+            missing_slugs.append(slug)
+
+    return resolved_map, missing_slugs
+
+
+def get_genuinely_new_exercises(
+    sessions_file_path: str, planned: List[PlannedSession]
+) -> List[str]:
+    """Return a list of exercise variable names in `planned` that do not exist in sessions.py."""
+    all_raw = [
+        ex.var_name
+        for ps in planned
+        for ex in ps.exercises
+        if ex.var_name and ex.var_name.strip()
+    ]
+    _, missing = resolve_exercise_vars(sessions_file_path, all_raw)
+    return missing
+
+
+# ---------------------------------------------------------------------------
 # Write planned sessions back into sessions.py
 # ---------------------------------------------------------------------------
 
@@ -478,16 +626,15 @@ def write_planned_sessions(
         file_content = f.read()
         lines = file_content.splitlines()
 
-    # Collect missing exercises
-    missing_exercises = []
-    seen = set()
-    for ps in planned:
-        for ex in ps.exercises:
-            if ex.var_name not in seen:
-                seen.add(ex.var_name)
-                # Quick check if it's defined anywhere in the file as `var_name = ...` or `var_name:`
-                if not re.search(rf"\b{ex.var_name}\b", file_content):
-                    missing_exercises.append(ex.var_name)
+    all_raw = [
+        ex.var_name
+        for ps in planned
+        for ex in ps.exercises
+        if ex.var_name and ex.var_name.strip()
+    ]
+    resolved_map, missing_exercises = resolve_exercise_vars(
+        sessions_file_path, all_raw
+    )
 
     # If missing, we inject definitions just before USER_DATA
     if missing_exercises:
@@ -518,15 +665,7 @@ def write_planned_sessions(
                 (i for i in range(user_data_start - 1, -1, -1) if "]" in lines[i]), -1
             )
             if reg_end != -1:
-                for mx in missing_exercises:
-                    slug = re.sub(r"\W+", "_", mx.lower()).strip("_")
-                    if not slug:
-                        slug = "exercise"
-                    if slug[0].isdigit():
-                        slug = "_" + slug
-                    lines.insert(reg_end, f"    Exercise({slug}),")
-
-                # Insert the constants before EXERCISE_REGISTRY
+                # Find REGISTRY start
                 reg_start = next(
                     (
                         i
@@ -536,23 +675,31 @@ def write_planned_sessions(
                     -1,
                 )
                 if reg_start != -1:
+                    # Insert constant defs before EXERCISE_REGISTRY
                     lines[reg_start:reg_start] = defs
+                    # Recalculate reg_end after inserting defs
+                    reg_end += len(defs)
+
+                reg_entries = []
+                for mx in missing_exercises:
+                    slug = re.sub(r"\W+", "_", mx.lower()).strip("_")
+                    reg_entries.append(f"    Exercise({slug}),")
+                lines[reg_end:reg_end] = reg_entries
             else:
                 lines[user_data_start:user_data_start] = defs
-
-        # Rewrite we need file_content updated to re-format the lines
-        # we will just continue using `lines` object
 
     injection_lines: List[str] = []
     for ps in planned:
         reps_mass_comment = []
         for ex in ps.exercises:
-            # Recompute slug if we had space
-            slug = re.sub(r"\W+", "_", ex.var_name.lower()).strip("_")
-            if not slug:
-                slug = "exercise"
-            if slug[0].isdigit():
-                slug = "_" + slug
+            var_to_use = resolved_map.get(ex.var_name)
+            if not var_to_use:
+                var_to_use = re.sub(r"\W+", "_", ex.var_name.lower()).strip("_")
+                if not var_to_use:
+                    var_to_use = "exercise"
+                if var_to_use[0].isdigit():
+                    var_to_use = "_" + var_to_use
+
             r_str = (
                 ex.reps
                 if "," in str(ex.reps)
@@ -565,7 +712,7 @@ def write_planned_sessions(
             )
             comment_part = f"  # {ex.comment}" if ex.comment.strip() else "  #"
             reps_mass_comment.append(
-                f"        {slug}: Log([{r_str}], [{m_str}]),{comment_part}"
+                f"        {var_to_use}: Log([{r_str}], [{m_str}]),{comment_part}"
             )
 
         injection_lines.append("")

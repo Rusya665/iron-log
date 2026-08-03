@@ -21,6 +21,9 @@ from core.version import __version__
 from core.xlsx_generator import TrainingLogProcessor
 
 
+import functools
+
+@functools.lru_cache(maxsize=32)
 def resource_path(relative_path):
     """Get absolute path to resource, works for dev and for PyInstaller"""
     if getattr(sys, "frozen", False):
@@ -989,9 +992,21 @@ class IronLogApp(ctk.CTk):
         if p.sessions_dir not in sys.path:
             sys.path.insert(0, p.sessions_dir)
         try:
+            file_path = os.path.join(p.sessions_dir, "sessions.py")
+            mtime = os.path.getmtime(file_path) if os.path.exists(file_path) else 0
+            if (
+                hasattr(self, "_cached_sessions_mtime")
+                and hasattr(self, "_cached_sessions_mod")
+                and self._cached_sessions_mtime == mtime
+                and mtime > 0
+            ):
+                return self._cached_sessions_mod
+
             import sessions
 
             importlib.reload(sessions)
+            self._cached_sessions_mtime = mtime
+            self._cached_sessions_mod = sessions
             return sessions
         except Exception:
             return None
@@ -1569,51 +1584,65 @@ class IronLogApp(ctk.CTk):
                     )
                     return
 
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-            os.makedirs(p.output_dir, exist_ok=True)
-            filename = os.path.join(p.output_dir, f"Training_Log_{timestamp}.xlsx")
+            self.set_status("⏳ Generating Excel report in background...", "#90caf9")
 
-            processor = TrainingLogProcessor(
-                filename,
-                sessions.EXERCISE_REGISTRY,
-                sessions.USER_DATA,
-                sessions.BODYMASS_LOG,
-                p.to_dict(),
-            )
+            def generate_task():
+                try:
+                    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+                    os.makedirs(p.output_dir, exist_ok=True)
+                    filename = os.path.join(p.output_dir, f"Training_Log_{timestamp}.xlsx")
 
-            try:
-                processor.validate_data()
-            except ValueError as ve:
-                self.set_status(
-                    "Generation Failed: Data Mismatch", "red", auto_reset_ms=8000
-                )
-                messagebox.showerror("Data Error", str(ve))
-                return
+                    processor = TrainingLogProcessor(
+                        filename,
+                        sessions.EXERCISE_REGISTRY,
+                        sessions.USER_DATA,
+                        sessions.BODYMASS_LOG,
+                        p.to_dict(),
+                    )
 
-            processor.write_headers()
-            processor.process_data(sessions.USER_DATA)
-            processor.write_calculations()
-            processor.generate_charts()
-            processor.write_definitions()
-            processor.write_personal_records()
-            processor.write_user_profile()
-            processor.save()
+                    try:
+                        processor.validate_data()
+                    except ValueError as ve:
+                        def _err():
+                            self.set_status("Generation Failed: Data Mismatch", "red", auto_reset_ms=8000)
+                            messagebox.showerror("Data Error", str(ve))
+                        self.after(0, _err)
+                        return
 
-            # Update last-generated timestamp
-            self.last_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
-            if hasattr(self, "last_gen_label"):
-                self.last_gen_label.configure(
-                    text=f"Last generated: {self.last_generated_at}"
-                )
+                    processor.write_headers()
+                    processor.process_data(sessions.USER_DATA)
+                    processor.write_calculations()
+                    processor.generate_charts()
+                    processor.write_definitions()
+                    processor.write_personal_records()
+                    processor.write_user_profile()
+                    processor.save()
 
-            self.set_status(
-                "✅ Success! Log saved to output folder.", "green", auto_reset_ms=8000
-            )
-            os.startfile(filename)
+                    def _success():
+                        self.last_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+                        if hasattr(self, "last_gen_label"):
+                            self.last_gen_label.configure(
+                                text=f"Last generated: {self.last_generated_at}"
+                            )
+                        self.set_status(
+                            "✅ Success! Excel log created.", "#4caf50", auto_reset_ms=8000
+                        )
+                        try:
+                            os.startfile(filename)
+                        except Exception:
+                            pass
+
+                    self.after(0, _success)
+
+                except Exception as e:
+                    def _fail(err_msg=str(e)):
+                        self.set_status(f"Error: {err_msg}", "red", auto_reset_ms=8000)
+                    self.after(0, _fail)
+
+            threading.Thread(target=generate_task, daemon=True).start()
 
         except Exception as e:
             self.set_status(f"Error: {str(e)}", "red", auto_reset_ms=8000)
-            messagebox.showerror("Unexpected Error", str(e))
 
     def run_plan_generator(self):
         p = self.manager.get_active_profile()
@@ -2122,10 +2151,10 @@ class DynamicPlanDialog(ctk.CTkToplevel):
         profile_index=None,
     ):
         super().__init__(parent)
+        self.withdraw()  # Fast single-pass rendering: hide until fully constructed
         self.title(title)
         self.geometry("980x700")
         self.minsize(980, 500)
-        self.grab_set()
 
         self.confirmed = False
 
@@ -2227,6 +2256,12 @@ class DynamicPlanDialog(ctk.CTkToplevel):
 
         self._build_content()
 
+        # Reveal pre-rendered dialog instantly
+        self.update_idletasks()
+        self.deiconify()
+        self.grab_set()
+        self.focus_force()
+
     def _prompt_deload(self):
         dialog = ctk.CTkInputDialog(text="Enter deload percentage (e.g., 10 for 10%):", title="Deload")
         val = dialog.get_input()
@@ -2260,7 +2295,20 @@ class DynamicPlanDialog(ctk.CTkToplevel):
                 except ValueError:
                     pass
         
-        self._build_content()
+        # Update UI StringVars in-place without rebuilding window
+        for (
+            ps_w,
+            ex_w,
+            row_frame,
+            name_str,
+            sets_v,
+            reps_v,
+            mass_v,
+            comment_v,
+        ) in self._widgets:
+            if row_frame.winfo_exists():
+                mass_v.set(ex_w.mass)
+                comment_v.set(ex_w.comment)
 
     def _prompt_restore_pre_deload(self):
         """Rebuild the plan from the last non-deload cycle at full (100%) weight.
@@ -2344,6 +2392,9 @@ class DynamicPlanDialog(ctk.CTkToplevel):
             ps.date_str = date_var.get().strip()
 
     def _build_content(self):
+        canvas = getattr(self.scroll, "_parent_canvas", None)
+        y_scroll = canvas.yview() if canvas else None
+
         for w in self.scroll.winfo_children():
             w.destroy()
         self._widgets.clear()
@@ -2419,6 +2470,7 @@ class DynamicPlanDialog(ctk.CTkToplevel):
             # Base tk.Entry width is in chars.
             # width=24 -> ~215px | width=5 -> ~55px | width=12 -> ~115px | width=17 -> ~165px
             layout = [
+                ("Order", 60),
                 ("Exercise Name / Slug", 215),
                 ("Sets", 55),
                 ("Reps", 115),
@@ -2439,6 +2491,51 @@ class DynamicPlanDialog(ctk.CTkToplevel):
             for ex in ps.exercises:
                 self._build_exercise_row(ps, ex, day_container)
 
+        if canvas and y_scroll:
+            self.update_idletasks()
+            try:
+                canvas.yview_moveto(y_scroll[0])
+            except Exception:
+                pass
+
+    def _move_exercise_up(self, ps, ex):
+        if ex not in ps.exercises:
+            return
+        idx = ps.exercises.index(ex)
+        if idx <= 0:
+            return
+
+        ex_prev = ps.exercises[idx - 1]
+        ps.exercises[idx - 1], ps.exercises[idx] = (
+            ps.exercises[idx],
+            ps.exercises[idx - 1],
+        )
+
+        row_cur = next((w[2] for w in self._widgets if w[1] is ex), None)
+        row_prev = next((w[2] for w in self._widgets if w[1] is ex_prev), None)
+
+        if row_cur and row_prev and row_cur.winfo_exists() and row_prev.winfo_exists():
+            row_cur.pack(before=row_prev, fill="x", padx=8, pady=2)
+
+    def _move_exercise_down(self, ps, ex):
+        if ex not in ps.exercises:
+            return
+        idx = ps.exercises.index(ex)
+        if idx >= len(ps.exercises) - 1:
+            return
+
+        ex_next = ps.exercises[idx + 1]
+        ps.exercises[idx], ps.exercises[idx + 1] = (
+            ps.exercises[idx + 1],
+            ps.exercises[idx],
+        )
+
+        row_cur = next((w[2] for w in self._widgets if w[1] is ex), None)
+        row_next = next((w[2] for w in self._widgets if w[1] is ex_next), None)
+
+        if row_cur and row_next and row_cur.winfo_exists() and row_next.winfo_exists():
+            row_next.pack(before=row_cur, fill="x", padx=8, pady=2)
+
     def _fast_add_exercise(self, ps, container):
         self._save_state()
         from core.plan_generator import PlannedExercise
@@ -2458,6 +2555,36 @@ class DynamicPlanDialog(ctk.CTkToplevel):
     def _build_exercise_row(self, ps, ex, container):
         ex_row = ctk.CTkFrame(container, fg_color="transparent")
         ex_row.pack(fill="x", padx=8, pady=2)
+
+        # Up / Down reordering buttons
+        order_frame = ctk.CTkFrame(ex_row, fg_color="transparent", width=55)
+        order_frame.pack(side="left", padx=2)
+
+        up_btn = ctk.CTkButton(
+            order_frame,
+            text="▲",
+            width=22,
+            height=22,
+            font=("Roboto", 9, "bold"),
+            fg_color="#333333",
+            hover_color="#555555",
+            command=lambda: self._move_exercise_up(ps, ex),
+        )
+        up_btn.pack(side="left", padx=1)
+        SimpleToolTip(up_btn, "Move Exercise Up")
+
+        down_btn = ctk.CTkButton(
+            order_frame,
+            text="▼",
+            width=22,
+            height=22,
+            font=("Roboto", 9, "bold"),
+            fg_color="#333333",
+            hover_color="#555555",
+            command=lambda: self._move_exercise_down(ps, ex),
+        )
+        down_btn.pack(side="left", padx=1)
+        SimpleToolTip(down_btn, "Move Exercise Down")
 
         name_v = ctk.StringVar(value=ex.var_name)
         sets_v = ctk.StringVar(value=str(ex.sets))
@@ -2803,7 +2930,27 @@ class DynamicPlanDialog(ctk.CTkToplevel):
                 self._parent_app.show_dashboard()
                 self._parent_app.set_status("✅ Initial split created!", "green", 5000)
             else:
-                from core.plan_generator import write_planned_sessions
+                from core.plan_generator import (
+                    get_genuinely_new_exercises,
+                    write_planned_sessions,
+                )
+
+                try:
+                    new_exs = get_genuinely_new_exercises(self._file_path, self._planned)
+                except Exception:
+                    new_exs = []
+
+                if new_exs:
+                    import tkinter.messagebox as mb
+
+                    ex_list_str = "\n".join(f"  • {ex}" for ex in new_exs)
+                    proceed = mb.askyesno(
+                        "Confirm New Exercise(s)",
+                        f"The following new exercise(s) were not found in sessions.py and will be automatically registered:\n\n{ex_list_str}\n\nDo you want to proceed and add them?",
+                        parent=self,
+                    )
+                    if not proceed:
+                        return
 
                 write_planned_sessions(self._file_path, self._planned)
 

@@ -46,7 +46,7 @@ def calc_brzycki(d: Log) -> float:
 
 
 METRICS_CONFIG: List[Metric] = [
-    Metric("Avg Reps", lambda d: statistics.mean(d.reps), "0.00"),
+    Metric("Avg Reps", lambda d: statistics.mean(d.reps) if d.reps else 0, "0.00"),
     Metric("Avg Mass", calc_avg_mass, "0.00"),
     Metric("Volume", calc_vol, "#,##0"),
     Metric("Est 1RM", calc_brzycki, "0.00"),
@@ -307,7 +307,13 @@ class TrainingLogProcessor:
         if not data:
             return
 
-        sorted_dates = sorted(data.keys())
+        import re as _re
+        date_pattern = _re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        valid_dates = [k for k in data.keys() if date_pattern.match(str(k))]
+        if not valid_dates:
+            return
+
+        sorted_dates = sorted(valid_dates)
 
         significant_dates = set(self.bodymass_log.keys())
         if sorted_dates:
