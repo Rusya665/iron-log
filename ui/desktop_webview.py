@@ -1,7 +1,7 @@
-"""PyWebView (Edge WebView2) Desktop GUI for Iron Log.
+"""PyWebView (Microsoft Edge WebView2) Desktop GUI for Iron Log.
 
-Styled to match the exact CustomTkinter sidebar, cards, color palette,
-and full Cycler (Dynamic Workout Plan Generator) workflow.
+Ultra-sleek, modern dark-themed interface with glassmorphic modals,
+custom scrollbars, interactive workout cycler, and instant search.
 """
 
 import copy
@@ -43,8 +43,14 @@ HTML_TEMPLATE = """
     <title>Iron Log</title>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-        body { background-color: #121212; color: #FFFFFF; height: 100vh; display: flex; overflow: hidden; }
+        body { background-color: #121212; color: #FFFFFF; height: 100vh; display: flex; overflow: hidden; user-select: none; }
         
+        /* Custom Modern Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #121212; }
+        ::-webkit-scrollbar-thumb { background: #2E2E2E; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #444444; }
+
         /* Left Sidebar (210px, #161616) */
         aside {
             width: 210px;
@@ -57,49 +63,53 @@ HTML_TEMPLATE = """
             flex-shrink: 0;
         }
         .prof-name { font-size: 17px; font-weight: bold; color: #FFFFFF; }
-        .prof-sub { font-size: 11px; color: #555555; margin-bottom: 6px; }
+        .prof-sub { font-size: 11px; color: #555555; margin-bottom: 4px; }
         .divider { height: 1px; background-color: #2E2E2E; margin: 8px 0; }
         
-        /* Sidebar Buttons */
+        /* Sidebar Action Buttons */
         .btn-side-primary1 {
-            background-color: #1565C0; color: #FFFFFF; font-size: 13px; font-weight: bold;
-            border-radius: 8px; padding: 11px; border: none; cursor: pointer; text-align: center;
-            transition: background 0.15s;
+            background: linear-gradient(135deg, #1565C0, #1976D2);
+            color: #FFFFFF; font-size: 13px; font-weight: bold;
+            border-radius: 8px; padding: 11px 12px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 2px 6px rgba(21, 101, 192, 0.3); transition: all 0.15s ease;
         }
-        .btn-side-primary1:hover { background-color: #1976D2; }
+        .btn-side-primary1:hover { filter: brightness(1.15); transform: translateY(-1px); }
 
         .btn-side-primary2 {
-            background-color: #6A1B9A; color: #FFFFFF; font-size: 13px; font-weight: bold;
-            border-radius: 8px; padding: 11px; border: none; cursor: pointer; text-align: center;
-            transition: background 0.15s;
+            background: linear-gradient(135deg, #6A1B9A, #7B1FA2);
+            color: #FFFFFF; font-size: 13px; font-weight: bold;
+            border-radius: 8px; padding: 11px 12px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 2px 6px rgba(106, 27, 154, 0.3); transition: all 0.15s ease;
         }
-        .btn-side-primary2:hover { background-color: #7B1FA2; }
+        .btn-side-primary2:hover { filter: brightness(1.15); transform: translateY(-1px); }
 
         .btn-side-primary3 {
-            background-color: #1B5E20; color: #FFFFFF; font-size: 13px; font-weight: bold;
-            border-radius: 8px; padding: 11px; border: none; cursor: pointer; text-align: center;
-            transition: background 0.15s;
+            background: linear-gradient(135deg, #1B5E20, #2E7D32);
+            color: #FFFFFF; font-size: 13px; font-weight: bold;
+            border-radius: 8px; padding: 11px 12px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 2px 6px rgba(27, 94, 32, 0.3); transition: all 0.15s ease;
         }
-        .btn-side-primary3:hover { background-color: #2E7D32; }
+        .btn-side-primary3:hover { filter: brightness(1.15); transform: translateY(-1px); }
 
         .btn-side-sec {
-            background-color: #252525; color: #BBBBBB; font-size: 12px;
-            border-radius: 7px; padding: 8px 12px; border: none; cursor: pointer; text-align: left;
-            transition: background 0.15s;
+            background-color: #252525; color: #BBBBBB; font-size: 12px; font-weight: 500;
+            border-radius: 7px; padding: 9px 12px; border: 1px solid transparent; cursor: pointer; text-align: left;
+            transition: all 0.15s ease; display: flex; align-items: center; gap: 8px;
         }
-        .btn-side-sec:hover { background-color: #333333; color: #FFFFFF; }
+        .btn-side-sec:hover { background-color: #333333; color: #FFFFFF; border-color: #444; }
         
         .side-status { margin-top: auto; font-size: 11px; color: #555555; }
-        .side-last-gen { font-size: 10px; color: #444444; }
+        .side-last-gen { font-size: 10px; color: #444444; margin-top: 2px; }
 
         /* Main Content Area */
         main {
             flex: 1;
-            padding: 16px 20px;
+            padding: 18px 22px;
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 16px;
             overflow-y: auto;
+            background-color: #121212;
         }
         
         .main-header {
@@ -107,12 +117,13 @@ HTML_TEMPLATE = """
             align-items: center;
             justify-content: space-between;
         }
-        .main-title { font-size: 22px; font-weight: bold; color: #FFFFFF; }
+        .main-title { font-size: 22px; font-weight: 800; color: #FFFFFF; letter-spacing: 0.3px; }
         .btn-refresh {
             background-color: #252525; color: #FFFFFF; font-size: 12px; font-weight: bold;
-            border-radius: 6px; padding: 6px 14px; border: none; cursor: pointer;
+            border-radius: 6px; padding: 7px 16px; border: 1px solid #333; cursor: pointer;
+            transition: all 0.15s;
         }
-        .btn-refresh:hover { background-color: #333333; }
+        .btn-refresh:hover { background-color: #333333; border-color: #555; }
 
         /* Stats Cards Row */
         .stats-row {
@@ -128,12 +139,12 @@ HTML_TEMPLATE = """
             display: flex;
             flex-direction: column;
             gap: 2px;
-            transition: background 0.15s;
+            transition: all 0.15s ease;
         }
         .stat-card.clickable { cursor: pointer; }
-        .stat-card.clickable:hover { background-color: #222224; }
-        .stat-t { font-size: 10px; font-weight: bold; color: #777777; text-transform: uppercase; }
-        .stat-v { font-size: 24px; font-weight: bold; color: #FFFFFF; }
+        .stat-card.clickable:hover { background-color: #242428; border-color: #3B82F6; transform: translateY(-1px); }
+        .stat-t { font-size: 10px; font-weight: 800; color: #777777; text-transform: uppercase; letter-spacing: 0.5px; }
+        .stat-v { font-size: 24px; font-weight: 800; color: #FFFFFF; margin: 2px 0; }
         .stat-s { font-size: 11px; color: #555555; }
 
         /* Workout Cards Grid */
@@ -164,71 +175,143 @@ HTML_TEMPLATE = """
         .card-sep { height: 1px; background-color: #2E2E2E; margin: 4px 0 6px 0; }
         .workout-card.pr-card .card-sep { background-color: #5A3000; }
         
-        .ex-item { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
-        .ex-name { color: #DDDDDD; }
+        .ex-item { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; }
+        .ex-name { color: #DDDDDD; font-weight: 500; }
         .ex-meta { color: #888888; font-size: 11px; }
 
-        /* Modal Windows (Plan Cycler, Standards, Split) */
+        /* Modal Windows */
         .modal-overlay {
-            position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+            position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
             display: none; align-items: center; justify-content: center; z-index: 1000;
+            opacity: 0; transition: opacity 0.2s ease;
         }
-        .modal-overlay.active { display: flex; }
+        .modal-overlay.active { display: flex; opacity: 1; }
         .modal-window {
-            background-color: #121212; border: 1px solid #2E2E2E; border-radius: 10px;
-            width: 960px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            background-color: #161618; border: 1px solid #2E2E32; border-radius: 12px;
+            width: 1020px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 16px 40px rgba(0,0,0,0.85);
+            animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .modal-hdr { background: #1A1A1A; padding: 14px 18px; border-bottom: 1px solid #2E2E2E; }
-        .modal-title { font-size: 16px; font-weight: bold; color: #FFFFFF; }
-        .modal-sub { font-size: 12px; color: #888888; margin-top: 2px; }
-        .modal-body { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
-        .modal-footer {
-            background: #111111; padding: 12px 18px; border-top: 1px solid #222222;
-            display: flex; gap: 10px; align-items: center;
+        @keyframes modalPop {
+            0% { transform: scale(0.96) translateY(8px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
         }
 
-        /* Cycler Day Box */
-        .plan-day-box {
-            background-color: #1A1A1A; border: 1px solid #2E2E2E; border-radius: 8px; padding: 12px;
-            display: flex; flex-direction: column; gap: 8px;
+        .modal-hdr { background: #1E1E22; padding: 14px 20px; border-bottom: 1px solid #2A2A2E; }
+        .modal-title { font-size: 16px; font-weight: 800; color: #FFFFFF; }
+        .modal-sub { font-size: 12px; color: #888888; margin-top: 2px; }
+        .modal-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+        .modal-footer {
+            background: #141416; padding: 12px 20px; border-top: 1px solid #222226;
+            display: flex; gap: 12px; align-items: center;
+        }
+
+        /* ── Modern Cycler Day Box ───────────────────────────────────────── */
+        .plan-day-card {
+            background-color: #1A1A1E; border: 1px solid #2A2A30; border-radius: 10px;
+            padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
         }
         .plan-day-hdr {
-            background-color: #222222; border-radius: 6px; padding: 8px 12px;
-            display: flex; align-items: center; gap: 10px;
+            background-color: #222228; border-radius: 8px; padding: 8px 12px;
+            display: flex; align-items: center; gap: 12px;
         }
-        .day-badge {
-            background-color: #00695C; color: white; font-weight: bold; font-size: 12px;
-            border-radius: 4px; padding: 4px 10px;
+        .day-pill {
+            background: linear-gradient(135deg, #00695C, #00897B);
+            color: white; font-weight: 800; font-size: 12px;
+            border-radius: 5px; padding: 5px 12px; letter-spacing: 0.5px;
         }
-        input, select {
-            background-color: #252525; color: #FFFFFF; border: 1px solid #3A3A3A;
-            border-radius: 5px; padding: 5px 8px; font-size: 12px; outline: none;
+        .date-label { font-size: 12px; font-weight: 600; color: #888888; }
+        
+        .plan-input {
+            background-color: #222226; color: #FFFFFF; border: 1px solid #33333A;
+            border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 500; outline: none;
+            transition: all 0.15s;
         }
-        input:focus { border-color: #1976D2; }
+        .plan-input:focus { border-color: #3B82F6; background-color: #26262C; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
+        .plan-input.center { text-align: center; }
 
-        table { width: 100%; border-collapse: collapse; font-size: 12px; }
-        th { color: #777777; font-weight: bold; text-align: left; padding: 4px 6px; }
-        td { padding: 4px 6px; }
-        
-        .btn-ctrl { background: #333333; color: white; border: none; border-radius: 3px; padding: 3px 6px; cursor: pointer; }
-        .btn-ctrl:hover { background: #444444; }
-        .btn-del { background: #5A1A1A; color: white; border: none; border-radius: 3px; padding: 3px 6px; cursor: pointer; }
-        .btn-del:hover { background: #C62828; }
-        .btn-add-ex { background: #0277BD; color: white; font-weight: bold; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; }
-        
-        .btn-save-plan {
-            background-color: #1B5E20; color: white; font-weight: bold; font-size: 13px;
-            border: none; border-radius: 6px; padding: 10px 22px; cursor: pointer; margin-left: auto;
+        /* Grid layout for Plan Row Headers and Rows */
+        .plan-row-grid {
+            display: grid;
+            grid-template-columns: 55px 1fr 60px 100px 110px 1fr 105px;
+            gap: 8px;
+            align-items: center;
         }
-        .btn-save-plan:hover { background-color: #2E7D32; }
+        .plan-col-head {
+            font-size: 11px; font-weight: 700; color: #666666; text-transform: uppercase;
+            letter-spacing: 0.5px; padding: 0 4px;
+        }
+        .plan-item-row {
+            background-color: #16161A; border: 1px solid #24242A; border-radius: 6px;
+            padding: 6px 8px; transition: background 0.15s;
+        }
+        .plan-item-row:hover { background-color: #1C1C22; border-color: #2E2E36; }
+
+        /* Control Buttons */
+        .order-btn-group { display: flex; gap: 2px; }
+        .btn-arrow {
+            background: #25252A; color: #AAA; border: 1px solid #33333C;
+            border-radius: 4px; width: 24px; height: 26px; cursor: pointer; font-size: 10px;
+            display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+        }
+        .btn-arrow:hover { background: #3B82F6; color: #FFF; border-color: #3B82F6; }
+
+        .btn-pill-inc {
+            background: #1C2E24; color: #4ADE80; border: 1px solid #234E36;
+            border-radius: 5px; padding: 4px 8px; font-size: 11px; font-weight: 700; cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-pill-inc:hover { background: #22C55E; color: #000; }
+
+        .btn-trash {
+            background: #331A1A; color: #F87171; border: 1px solid #552222;
+            border-radius: 5px; width: 28px; height: 28px; cursor: pointer; font-size: 12px;
+            display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+        }
+        .btn-trash:hover { background: #EF4444; color: #FFF; }
+
+        .btn-add-ex {
+            background: linear-gradient(135deg, #0277BD, #0288D1);
+            color: white; font-weight: 700; font-size: 12px; border: none;
+            border-radius: 6px; padding: 6px 14px; cursor: pointer; transition: all 0.15s;
+        }
+        .btn-add-ex:hover { filter: brightness(1.15); }
+
+        .btn-del-day {
+            background: #3B1C1C; color: #FCA5A5; border: 1px solid #662222;
+            border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+        }
+        .btn-del-day:hover { background: #DC2626; color: #FFF; }
+
+        .btn-save-plan {
+            background: linear-gradient(135deg, #1B5E20, #2E7D32);
+            color: white; font-weight: 800; font-size: 13px; border: none;
+            border-radius: 7px; padding: 10px 24px; cursor: pointer; margin-left: auto;
+            box-shadow: 0 2px 8px rgba(27, 94, 32, 0.4); transition: all 0.15s;
+        }
+        .btn-save-plan:hover { filter: brightness(1.15); transform: translateY(-1px); }
+
+        /* Tables for Standards & Split */
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th { color: #777777; font-weight: bold; text-align: left; padding: 8px; border-bottom: 1px solid #2A2A2E; }
+        td { padding: 8px; border-bottom: 1px solid #1E1E22; }
+        tr:hover { background-color: #1A1A20; }
+        
+        .badge-slug { color: #38BDF8; font-family: monospace; font-size: 12px; }
+        .btn-tool {
+            background: #25252A; color: white; border: 1px solid #33333C;
+            border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+        }
+        .btn-tool:hover { background: #3B82F6; border-color: #3B82F6; }
     </style>
 </head>
 <body>
     <!-- ── 1. LEFT SIDEBAR ─────────────────────────────────────────────── -->
     <aside>
         <div class="prof-name" id="sidebarProfName">Default User</div>
-        <div class="prof-sub">Iron Log (PyWebView Edge)</div>
+        <div class="prof-sub">Iron Log (PyWebView Edition)</div>
         <div class="divider"></div>
 
         <!-- Primary Action Buttons -->
@@ -239,10 +322,10 @@ HTML_TEMPLATE = """
         <div class="divider"></div>
 
         <!-- Secondary Action Buttons -->
-        <button class="btn-side-sec" onclick="pywebview.api.edit_sessions()">  📝  Edit Sessions</button>
-        <button class="btn-side-sec" onclick="pywebview.api.open_output()">  📊  Output Folder</button>
-        <button class="btn-side-sec" onclick="openStandardsModal()">  📚  Exercise Library</button>
-        <button class="btn-side-sec" onclick="openSplitModal()">  🔄  Split Details</button>
+        <button class="btn-side-sec" onclick="pywebview.api.edit_sessions()">📝  Edit Sessions</button>
+        <button class="btn-side-sec" onclick="pywebview.api.open_output()">📊  Output Folder</button>
+        <button class="btn-side-sec" onclick="openStandardsModal()">📚  Exercise Library</button>
+        <button class="btn-side-sec" onclick="openSplitModal()">🔄  Split Details</button>
 
         <div class="side-status" id="sidebarStatus">Ready</div>
         <div class="side-last-gen" id="sidebarLastGen"></div>
@@ -285,13 +368,13 @@ HTML_TEMPLATE = """
         <div class="modal-window">
             <div class="modal-hdr">
                 <div class="modal-title" id="cyclerTitle">Plan Next Cycle</div>
-                <div class="modal-sub">Define your training split. Type an exercise name to configure sets/reps.</div>
+                <div class="modal-sub">Define your training split. Type exercise variable name, sets, reps, mass, and notes.</div>
             </div>
             <div class="modal-body" id="cyclerDaysContainer"></div>
             <div class="modal-footer">
-                <button class="btn-ctrl" style="padding: 8px 16px; font-weight: bold;" onclick="closeModal('modalCycler')">Cancel</button>
+                <button class="btn-side-sec" style="padding: 8px 16px; font-weight: bold;" onclick="closeModal('modalCycler')">Cancel</button>
                 <button class="btn-side-primary2" style="padding: 8px 16px;" onclick="addPlanDay()">+ Add Day</button>
-                <button class="btn-ctrl" style="padding: 8px 14px;" onclick="applyDeload()">🧪 Deload Next Cycle (-10%)</button>
+                <button class="btn-side-sec" style="padding: 8px 14px;" onclick="applyDeload()">🧪 Deload Next Cycle (-10%)</button>
                 <button class="btn-save-plan" onclick="saveCyclerPlan()">✅ Write to sessions.py</button>
             </div>
         </div>
@@ -299,17 +382,17 @@ HTML_TEMPLATE = """
 
     <!-- ── 4. STRENGTH STANDARDS MODAL ─────────────────────────────────── -->
     <div id="modalStandards" class="modal-overlay">
-        <div class="modal-window" style="width: 820px;">
+        <div class="modal-window" style="width: 860px;">
             <div class="modal-hdr">
                 <div class="modal-title">Strength Standards Library</div>
-                <div style="margin-top: 8px; display: flex; gap: 8px;">
-                    <input type="text" id="stdSearchInput" placeholder="Filter exercises by name or slug..." style="flex: 1;" oninput="filterStandards(this.value)">
+                <div style="margin-top: 10px; display: flex; gap: 8px;">
+                    <input type="text" id="stdSearchInput" class="plan-input" placeholder="Filter exercises by name or slug..." style="flex: 1;" oninput="filterStandards(this.value)">
                 </div>
             </div>
             <div class="modal-body">
                 <table>
                     <thead>
-                        <tr style="border-bottom: 1px solid #2E2E2E;">
+                        <tr>
                             <th>Exercise Name</th><th>Slug</th><th>Beg</th><th>Nov</th><th>Int</th><th>Adv</th><th>Eli</th><th>Actions</th>
                         </tr>
                     </thead>
@@ -317,14 +400,14 @@ HTML_TEMPLATE = """
                 </table>
             </div>
             <div class="modal-footer">
-                <button class="btn-ctrl" style="padding: 8px 16px; margin-left: auto;" onclick="closeModal('modalStandards')">Close</button>
+                <button class="btn-side-sec" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalStandards')">Close</button>
             </div>
         </div>
     </div>
 
     <!-- ── 5. SPLIT DETAILS MODAL ──────────────────────────────────────── -->
     <div id="modalSplit" class="modal-overlay">
-        <div class="modal-window" style="width: 600px;">
+        <div class="modal-window" style="width: 620px;">
             <div class="modal-hdr">
                 <div class="modal-title">Current Split Details & History</div>
             </div>
@@ -333,16 +416,16 @@ HTML_TEMPLATE = """
                     <div class="stat-t">CURRENT SPLIT ROUTINE</div>
                     <div id="splitOverview" style="font-size: 13px; margin-top: 4px; line-height: 1.6;"></div>
                 </div>
-                <div style="font-weight: bold; font-size: 13px; margin-top: 6px;">Recent Split Sessions History:</div>
+                <div style="font-weight: bold; font-size: 13px; margin-top: 6px; color: #AAA;">Recent Split Sessions History:</div>
                 <table>
                     <thead>
-                        <tr style="border-bottom: 1px solid #2E2E2E;"><th>Date</th><th>Day</th><th>Exercises Count</th></tr>
+                        <tr><th>Date</th><th>Day</th><th>Exercises Count</th></tr>
                     </thead>
                     <tbody id="splitTbody"></tbody>
                 </table>
             </div>
             <div class="modal-footer">
-                <button class="btn-ctrl" style="padding: 8px 16px; margin-left: auto;" onclick="closeModal('modalSplit')">Close</button>
+                <button class="btn-side-sec" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalSplit')">Close</button>
             </div>
         </div>
     </div>
@@ -402,7 +485,7 @@ HTML_TEMPLATE = """
                 card.innerHTML = `
                     <div class="workout-card-hdr">${hdrStr}</div>
                     <div class="card-sep"></div>
-                    <div style="display: flex; flex-direction: column; gap: 4px;">${exsHtml}</div>
+                    <div style="display: flex; flex-direction: column; gap: 3px;">${exsHtml}</div>
                 `;
                 grid.appendChild(card);
             });
@@ -438,47 +521,64 @@ HTML_TEMPLATE = """
             const c = document.getElementById("cyclerDaysContainer");
             c.innerHTML = "";
             currentPlan.forEach((day, dIdx) => {
-                const box = document.createElement("div");
-                box.className = "plan-day-box";
-                let rows = "";
+                const card = document.createElement("div");
+                card.className = "plan-day-card";
+                
+                let rowsHtml = "";
                 day.exercises.forEach((ex, eIdx) => {
-                    rows += `
-                        <tr>
-                            <td style="width: 55px;">
-                                <button class="btn-ctrl" onclick="moveEx(${dIdx}, ${eIdx}, -1)">▲</button>
-                                <button class="btn-ctrl" onclick="moveEx(${dIdx}, ${eIdx}, 1)">▼</button>
-                            </td>
-                            <td><input type="text" value="${ex.var_name}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].var_name = this.value" style="width: 100%;"></td>
-                            <td style="width: 50px;"><input type="text" value="${ex.sets}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].sets = this.value" style="width: 45px;"></td>
-                            <td style="width: 95px;"><input type="text" value="${ex.reps}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].reps = this.value" style="width: 85px;"></td>
-                            <td style="width: 100px;"><input type="text" value="${ex.mass}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].mass = this.value" style="width: 90px;"></td>
-                            <td><input type="text" value="${ex.comment || ''}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].comment = this.value" style="width: 100%;"></td>
-                            <td style="width: 75px;">
-                                <button class="btn-ctrl" onclick="addMass(${dIdx}, ${eIdx}, 2.5)">+2.5</button>
-                                <button class="btn-del" onclick="removeEx(${dIdx}, ${eIdx})">✕</button>
-                            </td>
-                        </tr>
+                    rowsHtml += `
+                        <div class="plan-item-row plan-row-grid">
+                            <div class="order-btn-group">
+                                <button class="btn-arrow" onclick="moveEx(${dIdx}, ${eIdx}, -1)">▲</button>
+                                <button class="btn-arrow" onclick="moveEx(${dIdx}, ${eIdx}, 1)">▼</button>
+                            </div>
+                            <div>
+                                <input type="text" class="plan-input" value="${ex.var_name}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].var_name = this.value" placeholder="exercise_slug" style="width: 100%;">
+                            </div>
+                            <div>
+                                <input type="text" class="plan-input center" value="${ex.sets}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].sets = this.value" style="width: 100%;">
+                            </div>
+                            <div>
+                                <input type="text" class="plan-input center" value="${ex.reps}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].reps = this.value" placeholder="e.g. 6,6,6" style="width: 100%;">
+                            </div>
+                            <div>
+                                <input type="text" class="plan-input center" value="${ex.mass}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].mass = this.value" placeholder="kg" style="width: 100%;">
+                            </div>
+                            <div>
+                                <input type="text" class="plan-input" value="${ex.comment || ''}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].comment = this.value" placeholder="Comment / notes" style="width: 100%;">
+                            </div>
+                            <div style="display: flex; gap: 4px; align-items: center;">
+                                <button class="btn-pill-inc" onclick="addMass(${dIdx}, ${eIdx}, 2.5)">+2.5</button>
+                                <button class="btn-trash" onclick="removeEx(${dIdx}, ${eIdx})">✕</button>
+                            </div>
+                        </div>
                     `;
                 });
 
-                box.innerHTML = `
+                card.innerHTML = `
                     <div class="plan-day-hdr">
-                        <div class="day-badge">Day ${day.day_num}</div>
-                        <span style="font-size: 12px; color: #aaa;">Date:</span>
-                        <input type="text" value="${day.date_str}" onchange="currentPlan[${dIdx}].date_str = this.value" style="width: 110px;">
+                        <div class="day-pill">Day ${day.day_num}</div>
+                        <span class="date-label">Date:</span>
+                        <input type="text" class="plan-input" value="${day.date_str}" onchange="currentPlan[${dIdx}].date_str = this.value" placeholder="YYYY-MM-DD" style="width: 120px;">
                         <button class="btn-add-ex" style="margin-left: auto;" onclick="addEx(${dIdx})">+ Add Exercise</button>
-                        <button class="btn-del" onclick="removeDay(${dIdx})">🗑️</button>
+                        <button class="btn-del-day" onclick="removeDay(${dIdx})">🗑️ Delete Day</button>
                     </div>
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>Order</th><th>Exercise Name / Slug</th><th>Sets</th><th>Reps</th><th>Mass</th><th>Comment</th><th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody>${rows}</tbody>
-                    </table>
+
+                    <div class="plan-row-grid" style="padding: 0 8px;">
+                        <div class="plan-col-head">Order</div>
+                        <div class="plan-col-head">Exercise Name / Slug</div>
+                        <div class="plan-col-head" style="text-align: center;">Sets</div>
+                        <div class="plan-col-head" style="text-align: center;">Reps</div>
+                        <div class="plan-col-head" style="text-align: center;">Mass (kg)</div>
+                        <div class="plan-col-head">Comment</div>
+                        <div class="plan-col-head">Actions</div>
+                    </div>
+
+                    <div style="display: flex; flex-direction: column; gap: 6px;">
+                        ${rowsHtml}
+                    </div>
                 `;
-                c.appendChild(box);
+                c.appendChild(card);
             });
         }
 
@@ -556,13 +656,17 @@ HTML_TEMPLATE = """
                 const tr = document.createElement("tr");
                 const py = `${row.slug.replace(/-/g, '_')} = "${row.slug}"`;
                 tr.innerHTML = `
-                    <td>${row.name}</td>
-                    <td style="color: #38BDF8;">${row.slug}</td>
-                    <td>${row.beg}</td><td>${row.nov}</td><td>${row.int}</td><td>${row.adv}</td><td>${row.eli}</td>
-                    <td>
-                        <button class="btn-ctrl" onclick="pywebview.api.copy_clipboard('${row.slug}')">Copy</button>
-                        <button class="btn-ctrl" style="background: #1B5E20;" onclick="pywebview.api.copy_clipboard('${py}')">Copy Py</button>
-                        <button class="btn-ctrl" style="background: #1565C0;" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${row.slug}')">View</button>
+                    <td style="font-weight: 600;">${row.name}</td>
+                    <td><span class="badge-slug">${row.slug}</span></td>
+                    <td style="text-align: center;">${row.beg}</td>
+                    <td style="text-align: center;">${row.nov}</td>
+                    <td style="text-align: center;">${row.int}</td>
+                    <td style="text-align: center;">${row.adv}</td>
+                    <td style="text-align: center;">${row.eli}</td>
+                    <td style="display: flex; gap: 4px;">
+                        <button class="btn-tool" onclick="pywebview.api.copy_clipboard('${row.slug}')">Copy</button>
+                        <button class="btn-tool" style="background: #1B5E20; border-color: #2E7D32;" onclick="pywebview.api.copy_clipboard('${py}')">Copy Py</button>
+                        <button class="btn-tool" style="background: #1565C0; border-color: #1976D2;" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${row.slug}')">View</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -781,6 +885,8 @@ class WebViewBridgeApi:
                     PlannedSession(day_number=int(d.get("day_num", 1)), date_str=d.get("date_str", ""), exercises=ex_objs)
                 )
 
+            # Novel exercise confirmation
+            new_exs = get_genuinely_new_exercises(sessions_file, planned_objs)
             write_planned_sessions(sessions_file, planned_objs)
             return {"success": True}
         except Exception as e:

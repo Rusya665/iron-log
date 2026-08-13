@@ -1,11 +1,9 @@
-"""Interactive Multi-GUI Engine Launcher for Iron Log.
+"""Dual-Engine GUI Launcher for Iron Log.
 
-Allows launching and comparing all 4 GUI engines:
-  1. CustomTkinter (Original)
-  2. PySide6 (Qt 6 C++)
-  3. Dear PyGui (DirectX 11 GPU)
-  4. PyWebView (Microsoft Edge WebView2)
-  5. Launch All 4 Engines Side-by-Side
+Allows launching and comparing:
+  1. PyWebView       (Premier Modern HTML5/CSS/JS Engine)
+  2. CustomTkinter   (Original Legacy Tkinter Engine)
+  3. Launch Both Side-by-Side
 """
 
 import os
@@ -28,48 +26,40 @@ def launch_engine(engine_name: str):
 
 def main():
     if len(sys.argv) > 1 and sys.argv[1] in ["--all", "all"]:
-        print("\n🚀 Launching all 4 GUI engines simultaneously for direct side-by-side testing...\n")
-        for eng in ["ctk", "pyside", "dpg", "webview"]:
-            launch_engine(eng)
-            time.sleep(0.3)
-        print("\nAll 4 GUI windows launched! Check your taskbar / screen.")
+        print("\n🚀 Launching PyWebView and CustomTkinter side-by-side...\n")
+        launch_engine("webview")
+        time.sleep(0.3)
+        launch_engine("ctk")
+        print("\nBoth GUI windows launched!")
         return
 
     print("=" * 60)
-    print("       ⚡ IRON LOG — MULTI-ENGINE GUI TEST SUITE")
+    print("       ⚡ IRON LOG — GUI ENGINE LAUNCHER")
     print("=" * 60)
-    print("  [1] CustomTkinter       (Original Tkinter dark mode)")
-    print("  [2] PySide6             (Qt 6 C++ native rendering)")
-    print("  [3] Dear PyGui          (DirectX 11 GPU accelerated)")
-    print("  [4] PyWebView           (Edge WebView2 HTML/CSS/JS)")
-    print("  [5] 🚀 Launch ALL 4 simultaneously")
+    print("  [1] PyWebView       (Premier Modern Microsoft Edge Engine)")
+    print("  [2] CustomTkinter   (Legacy Fallback)")
+    print("  [3] 🚀 Launch BOTH side-by-side")
     print("  [0] Exit")
     print("=" * 60)
 
-    choice = input("\nEnter your choice (0-5) [Default: 5]: ").strip()
+    choice = input("\nEnter your choice (0-3) [Default: 1]: ").strip()
     if not choice:
-        choice = "5"
-
-    mapping = {
-        "1": "ctk",
-        "2": "pyside",
-        "3": "dpg",
-        "4": "webview",
-    }
+        choice = "1"
 
     if choice == "0":
         print("Exiting.")
         return
-    elif choice == "5":
-        for eng in ["ctk", "pyside", "dpg", "webview"]:
-            launch_engine(eng)
-            time.sleep(0.3)
-        print("\nAll 4 GUI windows launched!")
-    elif choice in mapping:
-        eng = mapping[choice]
-        print(f"\nLaunching {eng.upper()}...")
-        p = launch_engine(eng)
+    elif choice == "1":
+        p = launch_engine("webview")
         p.wait()
+    elif choice == "2":
+        p = launch_engine("ctk")
+        p.wait()
+    elif choice == "3":
+        launch_engine("webview")
+        time.sleep(0.3)
+        launch_engine("ctk")
+        print("\nBoth windows launched!")
     else:
         print("Invalid choice.")
 

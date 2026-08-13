@@ -1,39 +1,25 @@
 import argparse
-import sys
 import os
+import sys
 
 # Ensure local imports work correctly
 sys.path.append(os.path.dirname(__file__))
 
-def run_gui(engine: str = "ctk"):
-    if engine == "pyside":
-        from ui.desktop_pyside import run_pyside_app
-        run_pyside_app()
-    elif engine == "dpg":
-        from ui.desktop_dpg import run_dpg_app
-        run_dpg_app()
-    elif engine == "webview":
-        from ui.desktop_webview import run_webview_app
-        run_webview_app()
-    elif engine == "all":
-        import subprocess
-        python_exe = sys.executable
-        cwd = os.path.dirname(__file__)
-        print("Launching all 4 GUI engines simultaneously...")
-        subprocess.Popen([python_exe, "main.py", "--gui", "ctk"], cwd=cwd)
-        subprocess.Popen([python_exe, "main.py", "--gui", "pyside"], cwd=cwd)
-        subprocess.Popen([python_exe, "main.py", "--gui", "dpg"], cwd=cwd)
-        subprocess.Popen([python_exe, "main.py", "--gui", "webview"], cwd=cwd)
-    else:
+
+def run_gui(engine: str = "webview"):
+    if engine == "ctk":
         from ui.desktop import IronLogApp
         app = IronLogApp()
         app.mainloop()
+    else:
+        from ui.desktop_webview import run_webview_app
+        run_webview_app()
 
 
 def run_cli(args):
+    from datetime import datetime
     from core.config import get_config
     from core.xlsx_generator import TrainingLogProcessor
-    from datetime import datetime
 
     config = get_config(reconfigure=args.reconfigure, cli_mode=True)
     sessions_dir = config.get("sessions_dir")
@@ -66,9 +52,10 @@ def run_cli(args):
     app.write_personal_records()
     app.write_user_profile()
     app.save()
-    
+
     if sys.platform == "win32":
         os.startfile(filename)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Iron Log Launcher")
@@ -76,9 +63,9 @@ if __name__ == "__main__":
     parser.add_argument("--reconfigure", action="store_true", help="[CLI Only] Prompt to reconfigure paths")
     parser.add_argument(
         "--gui",
-        choices=["ctk", "pyside", "dpg", "webview", "all"],
-        default="ctk",
-        help="Select GUI engine: ctk (CustomTkinter), pyside (PySide6 / Qt 6), dpg (Dear PyGui GPU), webview (PyWebView Edge), or all",
+        choices=["webview", "ctk"],
+        default="webview",
+        help="Select GUI engine: webview (PyWebView Modern Edge - Default) or ctk (CustomTkinter Fallback)",
     )
     args = parser.parse_args()
 
