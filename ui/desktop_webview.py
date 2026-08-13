@@ -1,16 +1,19 @@
-"""PyWebView (Microsoft Edge WebView2) Desktop GUI for Iron Log.
+"""PyWebView (Edge WebView2) Desktop GUI for Iron Log.
 
-Provides modern web styling (Tailwind CSS, Glassmorphism, smooth animations)
-with zero Electron overhead by utilizing the OS native Edge WebView2 runtime.
+Styled to match the exact CustomTkinter sidebar, cards, color palette,
+and full Cycler (Dynamic Workout Plan Generator) workflow.
 """
 
+import copy
+import glob
+import importlib
 import json
 import os
 import re
 import sys
 import threading
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 import webview
@@ -39,412 +42,482 @@ HTML_TEMPLATE = """
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iron Log</title>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
-        body { background-color: #121214; color: #F4F4F5; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        body { background-color: #121212; color: #FFFFFF; height: 100vh; display: flex; overflow: hidden; }
         
-        /* Header */
-        header { background-color: #18181B; border-bottom: 1px solid #27272A; padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; }
-        .brand { font-size: 16px; font-weight: 800; color: #38BDF8; letter-spacing: 1px; display: flex; align-items: center; gap: 8px; }
-        .version { font-size: 12px; color: #71717A; font-weight: normal; }
-        .engine-badge { background: #064E3B; border: 1px solid #15803D; color: #4ADE80; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 4px; }
+        /* Left Sidebar (210px, #161616) */
+        aside {
+            width: 210px;
+            background-color: #161616;
+            border-right: 1px solid #222222;
+            padding: 20px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .prof-name { font-size: 17px; font-weight: bold; color: #FFFFFF; }
+        .prof-sub { font-size: 11px; color: #555555; margin-bottom: 6px; }
+        .divider { height: 1px; background-color: #2E2E2E; margin: 8px 0; }
         
-        .profile-bar { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-        select, input { background: #27272A; border: 1px solid #3F3F46; color: #F4F4F5; padding: 5px 10px; border-radius: 6px; font-size: 13px; outline: none; }
-        select:focus, input:focus { border-color: #3B82F6; }
+        /* Sidebar Buttons */
+        .btn-side-primary1 {
+            background-color: #1565C0; color: #FFFFFF; font-size: 13px; font-weight: bold;
+            border-radius: 8px; padding: 11px; border: none; cursor: pointer; text-align: center;
+            transition: background 0.15s;
+        }
+        .btn-side-primary1:hover { background-color: #1976D2; }
+
+        .btn-side-primary2 {
+            background-color: #6A1B9A; color: #FFFFFF; font-size: 13px; font-weight: bold;
+            border-radius: 8px; padding: 11px; border: none; cursor: pointer; text-align: center;
+            transition: background 0.15s;
+        }
+        .btn-side-primary2:hover { background-color: #7B1FA2; }
+
+        .btn-side-primary3 {
+            background-color: #1B5E20; color: #FFFFFF; font-size: 13px; font-weight: bold;
+            border-radius: 8px; padding: 11px; border: none; cursor: pointer; text-align: center;
+            transition: background 0.15s;
+        }
+        .btn-side-primary3:hover { background-color: #2E7D32; }
+
+        .btn-side-sec {
+            background-color: #252525; color: #BBBBBB; font-size: 12px;
+            border-radius: 7px; padding: 8px 12px; border: none; cursor: pointer; text-align: left;
+            transition: background 0.15s;
+        }
+        .btn-side-sec:hover { background-color: #333333; color: #FFFFFF; }
         
-        /* Tabs */
-        .tabs { display: flex; gap: 4px; padding: 10px 18px 0 18px; background: #121214; border-bottom: 1px solid #27272A; }
-        .tab-btn { background: transparent; border: none; color: #A1A1AA; padding: 8px 16px; font-weight: 600; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; }
-        .tab-btn:hover { color: #FFFFFF; }
-        .tab-btn.active { color: #38BDF8; border-bottom-color: #38BDF8; }
+        .side-status { margin-top: auto; font-size: 11px; color: #555555; }
+        .side-last-gen { font-size: 10px; color: #444444; }
+
+        /* Main Content Area */
+        main {
+            flex: 1;
+            padding: 16px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            overflow-y: auto;
+        }
         
-        /* Main Views */
-        main { flex: 1; padding: 16px 18px; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; }
-        .view-tab { display: none; flex-direction: column; gap: 14px; flex: 1; }
-        .view-tab.active { display: flex; }
+        .main-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .main-title { font-size: 22px; font-weight: bold; color: #FFFFFF; }
+        .btn-refresh {
+            background-color: #252525; color: #FFFFFF; font-size: 12px; font-weight: bold;
+            border-radius: 6px; padding: 6px 14px; border: none; cursor: pointer;
+        }
+        .btn-refresh:hover { background-color: #333333; }
+
+        /* Stats Cards Row */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        .stat-card {
+            background-color: #1C1C1E;
+            border: 1px solid #2E2E2E;
+            border-radius: 10px;
+            padding: 14px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+            transition: background 0.15s;
+        }
+        .stat-card.clickable { cursor: pointer; }
+        .stat-card.clickable:hover { background-color: #222224; }
+        .stat-t { font-size: 10px; font-weight: bold; color: #777777; text-transform: uppercase; }
+        .stat-v { font-size: 24px; font-weight: bold; color: #FFFFFF; }
+        .stat-s { font-size: 11px; color: #555555; }
+
+        /* Workout Cards Grid */
+        .sessions-row {
+            display: flex;
+            gap: 12px;
+            overflow-x: auto;
+            flex: 1;
+            padding-bottom: 6px;
+        }
+        .workout-card {
+            background-color: #1C1C1E;
+            border: 1px solid #2E2E2E;
+            border-radius: 10px;
+            min-width: 260px;
+            flex: 1;
+            padding: 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .workout-card.pr-card {
+            background-color: #2A1A00;
+            border-color: #5A3000;
+        }
+        .workout-card-hdr { font-size: 13px; font-weight: bold; color: #FFFFFF; }
+        .workout-card.pr-card .workout-card-hdr { color: #B45309; }
+        .card-sep { height: 1px; background-color: #2E2E2E; margin: 4px 0 6px 0; }
+        .workout-card.pr-card .card-sep { background-color: #5A3000; }
         
-        /* Cards */
-        .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
-        .stat-card { background: #18181B; border: 1px solid #27272A; border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
-        .stat-title { font-size: 11px; font-weight: 600; color: #A1A1AA; text-transform: uppercase; }
-        .stat-val { font-size: 20px; font-weight: bold; color: #38BDF8; }
-        .stat-sub { font-size: 11px; color: #71717A; }
+        .ex-item { display: flex; justify-content: space-between; font-size: 12px; padding: 2px 0; }
+        .ex-name { color: #DDDDDD; }
+        .ex-meta { color: #888888; font-size: 11px; }
+
+        /* Modal Windows (Plan Cycler, Standards, Split) */
+        .modal-overlay {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+            display: none; align-items: center; justify-content: center; z-index: 1000;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal-window {
+            background-color: #121212; border: 1px solid #2E2E2E; border-radius: 10px;
+            width: 960px; max-height: 85vh; display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.8);
+        }
+        .modal-hdr { background: #1A1A1A; padding: 14px 18px; border-bottom: 1px solid #2E2E2E; }
+        .modal-title { font-size: 16px; font-weight: bold; color: #FFFFFF; }
+        .modal-sub { font-size: 12px; color: #888888; margin-top: 2px; }
+        .modal-body { flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; }
+        .modal-footer {
+            background: #111111; padding: 12px 18px; border-top: 1px solid #222222;
+            display: flex; gap: 10px; align-items: center;
+        }
+
+        /* Cycler Day Box */
+        .plan-day-box {
+            background-color: #1A1A1A; border: 1px solid #2E2E2E; border-radius: 8px; padding: 12px;
+            display: flex; flex-direction: column; gap: 8px;
+        }
+        .plan-day-hdr {
+            background-color: #222222; border-radius: 6px; padding: 8px 12px;
+            display: flex; align-items: center; gap: 10px;
+        }
+        .day-badge {
+            background-color: #00695C; color: white; font-weight: bold; font-size: 12px;
+            border-radius: 4px; padding: 4px 10px;
+        }
+        input, select {
+            background-color: #252525; color: #FFFFFF; border: 1px solid #3A3A3A;
+            border-radius: 5px; padding: 5px 8px; font-size: 12px; outline: none;
+        }
+        input:focus { border-color: #1976D2; }
+
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th { color: #777777; font-weight: bold; text-align: left; padding: 4px 6px; }
+        td { padding: 4px 6px; }
         
-        /* Action Buttons */
-        .actions-bar { display: flex; gap: 8px; align-items: center; }
-        .btn { background: #27272A; border: 1px solid #3F3F46; color: #F4F4F5; padding: 7px 14px; border-radius: 6px; font-weight: 600; font-size: 12px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; transition: all 0.15s; }
-        .btn:hover { background: #3F3F46; border-color: #52525B; }
-        .btn-primary { background: #2563EB; border-color: #3B82F6; color: #FFFFFF; }
-        .btn-primary:hover { background: #1D4ED8; }
-        .btn-success { background: #15803D; border-color: #22C55E; color: #FFFFFF; }
-        .btn-success:hover { background: #166534; }
-        .btn-danger { background: #991B1B; border-color: #EF4444; color: #FFFFFF; }
-        .btn-sm { padding: 3px 8px; font-size: 11px; }
+        .btn-ctrl { background: #333333; color: white; border: none; border-radius: 3px; padding: 3px 6px; cursor: pointer; }
+        .btn-ctrl:hover { background: #444444; }
+        .btn-del { background: #5A1A1A; color: white; border: none; border-radius: 3px; padding: 3px 6px; cursor: pointer; }
+        .btn-del:hover { background: #C62828; }
+        .btn-add-ex { background: #0277BD; color: white; font-weight: bold; border: none; border-radius: 4px; padding: 5px 10px; cursor: pointer; }
         
-        /* Sessions Container */
-        .sessions-row { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 8px; }
-        .session-card { background: #18181B; border: 1px solid #27272A; border-radius: 8px; min-width: 250px; flex: 1; padding: 12px; display: flex; flex-direction: column; gap: 8px; }
-        .session-hdr { font-size: 13px; font-weight: bold; color: #38BDF8; border-bottom: 1px solid #27272A; padding-bottom: 6px; }
-        .session-ex { display: flex; flex-direction: column; font-size: 12px; gap: 2px; }
-        .session-ex-name { font-weight: 600; color: #E4E4E7; }
-        .session-ex-meta { color: #A1A1AA; font-size: 11px; }
-        
-        /* Tables */
-        table { width: 100%; border-collapse: collapse; background: #18181B; border-radius: 8px; overflow: hidden; border: 1px solid #27272A; font-size: 12px; }
-        th, td { padding: 8px 10px; text-align: left; border-bottom: 1px solid #27272A; }
-        th { background: #27272A; color: #E4E4E7; font-weight: 600; }
-        tr:hover { background: #202024; }
-        
-        /* Toast Notification */
-        #toast { position: fixed; bottom: 35px; right: 20px; background: #10B981; color: white; padding: 8px 16px; border-radius: 6px; font-weight: 600; font-size: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.5); opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 100; }
-        
-        /* Footer */
-        footer { background: #18181B; border-top: 1px solid #27272A; padding: 6px 18px; font-size: 11px; color: #A1A1AA; display: flex; justify-content: space-between; }
+        .btn-save-plan {
+            background-color: #1B5E20; color: white; font-weight: bold; font-size: 13px;
+            border: none; border-radius: 6px; padding: 10px 22px; cursor: pointer; margin-left: auto;
+        }
+        .btn-save-plan:hover { background-color: #2E7D32; }
     </style>
 </head>
 <body>
-    <header>
-        <div class="brand">
-            <span>⚡ IRON LOG</span>
-            <span class="version" id="appVersion">v1.3.1</span>
-        </div>
-        <div class="profile-bar">
-            <span>Profile:</span>
-            <select id="profileSelect" onchange="onProfileChange(this.value)"></select>
-            <button class="btn btn-sm" onclick="promptNewProfile()">+ New</button>
-        </div>
-        <div class="engine-badge">Engine: PyWebView (Edge WebView2)</div>
-    </header>
+    <!-- ── 1. LEFT SIDEBAR ─────────────────────────────────────────────── -->
+    <aside>
+        <div class="prof-name" id="sidebarProfName">Default User</div>
+        <div class="prof-sub">Iron Log (PyWebView Edge)</div>
+        <div class="divider"></div>
 
-    <div class="tabs">
-        <button class="tab-btn active" onclick="switchTab('dashboard', this)">Dashboard</button>
-        <button class="tab-btn" onclick="switchTab('planner', this)">Cycle Planner</button>
-        <button class="tab-btn" onclick="switchTab('standards', this)">Strength Standards</button>
-        <button class="tab-btn" onclick="switchTab('split', this)">Split Details</button>
-    </div>
+        <!-- Primary Action Buttons -->
+        <button class="btn-side-primary1" onclick="generateExcel()">🚀 Generate Excel Log</button>
+        <button class="btn-side-primary2" onclick="openPlanCycler()">🗓️ Plan Next Cycle</button>
+        <button class="btn-side-primary3" onclick="pywebview.api.open_latest_excel()">📂 Open Latest Log</button>
 
+        <div class="divider"></div>
+
+        <!-- Secondary Action Buttons -->
+        <button class="btn-side-sec" onclick="pywebview.api.edit_sessions()">  📝  Edit Sessions</button>
+        <button class="btn-side-sec" onclick="pywebview.api.open_output()">  📊  Output Folder</button>
+        <button class="btn-side-sec" onclick="openStandardsModal()">  📚  Exercise Library</button>
+        <button class="btn-side-sec" onclick="openSplitModal()">  🔄  Split Details</button>
+
+        <div class="side-status" id="sidebarStatus">Ready</div>
+        <div class="side-last-gen" id="sidebarLastGen"></div>
+    </aside>
+
+    <!-- ── 2. MAIN CONTENT AREA ────────────────────────────────────────── -->
     <main>
-        <!-- Tab 1: Dashboard -->
-        <div id="tab-dashboard" class="view-tab active">
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-title">Total Sessions</div>
-                    <div class="stat-val" id="statTotal">--</div>
-                    <div class="stat-sub" id="statTotalSub">-- this year</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-title">Last Workout</div>
-                    <div class="stat-val" id="statLast">--</div>
-                    <div class="stat-sub" id="statLastSub">Latest date</div>
-                </div>
-                <div class="stat-card" style="cursor: pointer;" onclick="switchTab('split', document.querySelectorAll('.tab-btn')[3])">
-                    <div class="stat-title">Active Split</div>
-                    <div class="stat-val" id="statSplit">--</div>
-                    <div class="stat-sub">Click for details</div>
-                </div>
-                <div class="stat-card">
-                    <div class="stat-title">Body Mass</div>
-                    <div class="stat-val" id="statMass">-- kg</div>
-                    <div class="stat-sub">From log</div>
-                </div>
-            </div>
+        <div class="main-header">
+            <div class="main-title">Recent Sessions</div>
+            <button class="btn-refresh" onclick="loadDashboard()">↻  Refresh</button>
+        </div>
 
-            <div class="actions-bar">
-                <button class="btn btn-primary" onclick="generateExcel()">📊 Generate Excel Log</button>
-                <button class="btn" onclick="switchTab('planner', document.querySelectorAll('.tab-btn')[1])">📅 Cycle Planner</button>
-                <button class="btn" onclick="switchTab('standards', document.querySelectorAll('.tab-btn')[2])">🏋️ Standards Browser</button>
-                <button class="btn" onclick="pywebview.api.edit_sessions()">Edit sessions.py</button>
-                <button class="btn" onclick="pywebview.api.open_output()">Output Folder</button>
+        <!-- 3 Stats Metric Cards -->
+        <div class="stats-row">
+            <div class="stat-card">
+                <div class="stat-t">GYM ATTENDANCE</div>
+                <div class="stat-v" id="c1Val">-- Days</div>
+                <div class="stat-s" id="c1Sub">-- this year · -- this month</div>
             </div>
-
-            <div style="font-size: 13px; font-weight: bold; color: #A1A1AA;">Recent Workout Sessions (Active Cycle)</div>
-            <div class="sessions-row" id="sessionsContainer">
-                <div style="color: #71717A;">Loading workout sessions...</div>
+            <div class="stat-card clickable" onclick="openSplitModal()">
+                <div class="stat-t">CURRENT SPLIT DURATION</div>
+                <div class="stat-v" id="c2Val">-- Weeks</div>
+                <div class="stat-s" id="c2Sub">N-Day Split · started --</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-t">LAST WORKOUT</div>
+                <div class="stat-v" id="c3Val">--</div>
+                <div class="stat-s" id="c3Sub">Day --</div>
             </div>
         </div>
 
-        <!-- Tab 2: Cycle Planner -->
-        <div id="tab-planner" class="view-tab">
-            <div class="actions-bar">
-                <button class="btn" onclick="applyDeload()">Deload (-10%)</button>
-                <button class="btn" onclick="addPlanDay()">+ Add Day</button>
-                <button class="btn btn-success" style="margin-left: auto;" onclick="savePlan()">💾 Save Plan to sessions.py</button>
-            </div>
-            <div id="plannerDays" style="display: flex; flex-direction: column; gap: 12px; overflow-y: auto;">
-                <div>Loading planner...</div>
-            </div>
-        </div>
-
-        <!-- Tab 3: Strength Standards -->
-        <div id="tab-standards" class="view-tab">
-            <div style="display: flex; gap: 10px; align-items: center;">
-                <span style="font-weight: 600; font-size: 13px;">Search:</span>
-                <input type="text" id="stdSearch" placeholder="Type exercise name or slug (e.g. bench press)..." style="flex: 1;" oninput="onStandardsSearch(this.value)">
-            </div>
-            <div style="overflow-y: auto; flex: 1;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Exercise Name</th>
-                            <th>Slug</th>
-                            <th>Beg</th>
-                            <th>Nov</th>
-                            <th>Int</th>
-                            <th>Adv</th>
-                            <th>Eli</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="standardsTbody"></tbody>
-                </table>
-            </div>
-        </div>
-
-        <!-- Tab 4: Split Details -->
-        <div id="tab-split" class="view-tab">
-            <div class="stat-card" style="margin-bottom: 10px;">
-                <div class="stat-title" style="color: #38BDF8; font-size: 13px;">Routine Overview</div>
-                <div id="splitOverviewText" style="font-size: 13px; margin-top: 6px; line-height: 1.6;"></div>
-            </div>
-            <div style="font-weight: bold; font-size: 13px; margin-bottom: 6px;">Split Sessions History</div>
-            <div style="overflow-y: auto; flex: 1;">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Date</th>
-                            <th>Day</th>
-                            <th>Exercises Count</th>
-                        </tr>
-                    </thead>
-                    <tbody id="splitHistoryTbody"></tbody>
-                </table>
-            </div>
+        <!-- Recent Sessions Horizontal Cards -->
+        <div class="sessions-row" id="sessionsGrid">
+            <div style="color: #777777;">Loading workout sessions...</div>
         </div>
     </main>
 
-    <div id="toast">Copied to clipboard!</div>
+    <!-- ── 3. DYNAMIC PLAN CYCLER MODAL ────────────────────────────────── -->
+    <div id="modalCycler" class="modal-overlay">
+        <div class="modal-window">
+            <div class="modal-hdr">
+                <div class="modal-title" id="cyclerTitle">Plan Next Cycle</div>
+                <div class="modal-sub">Define your training split. Type an exercise name to configure sets/reps.</div>
+            </div>
+            <div class="modal-body" id="cyclerDaysContainer"></div>
+            <div class="modal-footer">
+                <button class="btn-ctrl" style="padding: 8px 16px; font-weight: bold;" onclick="closeModal('modalCycler')">Cancel</button>
+                <button class="btn-side-primary2" style="padding: 8px 16px;" onclick="addPlanDay()">+ Add Day</button>
+                <button class="btn-ctrl" style="padding: 8px 14px;" onclick="applyDeload()">🧪 Deload Next Cycle (-10%)</button>
+                <button class="btn-save-plan" onclick="saveCyclerPlan()">✅ Write to sessions.py</button>
+            </div>
+        </div>
+    </div>
 
-    <footer>
-        <span id="statusTxt">Ready</span>
-        <span>HTML5 + CSS + Edge WebView2 Engine</span>
-    </footer>
+    <!-- ── 4. STRENGTH STANDARDS MODAL ─────────────────────────────────── -->
+    <div id="modalStandards" class="modal-overlay">
+        <div class="modal-window" style="width: 820px;">
+            <div class="modal-hdr">
+                <div class="modal-title">Strength Standards Library</div>
+                <div style="margin-top: 8px; display: flex; gap: 8px;">
+                    <input type="text" id="stdSearchInput" placeholder="Filter exercises by name or slug..." style="flex: 1;" oninput="filterStandards(this.value)">
+                </div>
+            </div>
+            <div class="modal-body">
+                <table>
+                    <thead>
+                        <tr style="border-bottom: 1px solid #2E2E2E;">
+                            <th>Exercise Name</th><th>Slug</th><th>Beg</th><th>Nov</th><th>Int</th><th>Adv</th><th>Eli</th><th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stdTbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-ctrl" style="padding: 8px 16px; margin-left: auto;" onclick="closeModal('modalStandards')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── 5. SPLIT DETAILS MODAL ──────────────────────────────────────── -->
+    <div id="modalSplit" class="modal-overlay">
+        <div class="modal-window" style="width: 600px;">
+            <div class="modal-hdr">
+                <div class="modal-title">Current Split Details & History</div>
+            </div>
+            <div class="modal-body">
+                <div class="stat-card">
+                    <div class="stat-t">CURRENT SPLIT ROUTINE</div>
+                    <div id="splitOverview" style="font-size: 13px; margin-top: 4px; line-height: 1.6;"></div>
+                </div>
+                <div style="font-weight: bold; font-size: 13px; margin-top: 6px;">Recent Split Sessions History:</div>
+                <table>
+                    <thead>
+                        <tr style="border-bottom: 1px solid #2E2E2E;"><th>Date</th><th>Day</th><th>Exercises Count</th></tr>
+                    </thead>
+                    <tbody id="splitTbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-ctrl" style="padding: 8px 16px; margin-left: auto;" onclick="closeModal('modalSplit')">Close</button>
+            </div>
+        </div>
+    </div>
 
     <script>
         let currentPlan = [];
-        let allStandards = [];
+        let cachedStats = {};
 
-        function showToast(msg) {
-            const t = document.getElementById("toast");
-            t.innerText = msg;
-            t.style.opacity = "1";
-            setTimeout(() => { t.style.opacity = "0"; }, 2500);
+        function closeModal(id) {
+            document.getElementById(id).classList.remove("active");
         }
 
-        function setStatus(msg) {
-            document.getElementById("statusTxt").innerText = msg;
+        async function init() {
+            await loadDashboard();
         }
 
-        function switchTab(tabId, btn) {
-            document.querySelectorAll(".view-tab").forEach(el => el.classList.remove("active"));
-            document.querySelectorAll(".tab-btn").forEach(el => el.classList.remove("active"));
-            document.getElementById("tab-" + tabId).classList.add("active");
-            if (btn) btn.classList.add("active");
-            if (tabId === "planner") loadPlanner();
-            if (tabId === "standards" && allStandards.length === 0) onStandardsSearch("");
-        }
-
-        async function initApp() {
-            try {
-                const profilesData = await pywebview.api.get_profiles();
-                const sel = document.getElementById("profileSelect");
-                sel.innerHTML = "";
-                profilesData.profiles.forEach((p, idx) => {
-                    const opt = document.createElement("option");
-                    opt.value = idx;
-                    opt.text = p.name;
-                    if (idx === profilesData.active_index) opt.selected = true;
-                    sel.appendChild(opt);
-                });
-                await loadDashboardData();
-            } catch(e) {
-                setStatus("Init error: " + e);
-            }
-        }
-
-        async function onProfileChange(idx) {
-            await pywebview.api.select_profile(parseInt(idx));
-            await loadDashboardData();
-        }
-
-        async function promptNewProfile() {
-            const name = prompt("Enter new profile name:");
-            if (name && name.trim()) {
-                await pywebview.api.create_profile(name.trim());
-                await initApp();
-            }
-        }
-
-        async function loadDashboardData() {
-            setStatus("Loading data...");
+        async function loadDashboard() {
+            document.getElementById("sidebarStatus").innerText = "Loading...";
             const data = await pywebview.api.get_active_data();
             if (!data.success) {
-                setStatus(data.error);
+                document.getElementById("sidebarStatus").innerText = data.error;
                 return;
             }
+            document.getElementById("sidebarProfName").innerText = data.profile_name;
             const s = data.stats;
-            document.getElementById("statTotal").innerText = s.total_days || "--";
-            document.getElementById("statTotalSub").innerText = (s.this_year_days || 0) + " this year";
-            document.getElementById("statLast").innerText = s.latest_workout_date || "--";
-            document.getElementById("statLastSub").innerText = "Day " + (s.latest_workout_day || "");
-            document.getElementById("statSplit").innerText = (s.current_split_weeks || 0).toFixed(1) + " Wks";
-            document.getElementById("statMass").innerText = (data.current_mass || "--") + " kg";
+            cachedStats = s;
 
-            // Render Recent Sessions
-            const sc = document.getElementById("sessionsContainer");
-            sc.innerHTML = "";
-            if (!data.sessions || data.sessions.length === 0) {
-                sc.innerHTML = "<div style='color: #71717A;'>No sessions found.</div>";
-            } else {
-                data.sessions.forEach(sess => {
-                    const card = document.createElement("div");
-                    card.className = "session-card";
-                    let exHtml = "";
-                    sess.exercises.forEach(ex => {
-                        exHtml += `
-                            <div class="session-ex">
-                                <span class="session-ex-name">• ${ex.name}</span>
-                                <span class="session-ex-meta">[${ex.reps}] @ ${ex.mass}</span>
-                            </div>
-                        `;
-                    });
-                    card.innerHTML = `
-                        <div class="session-hdr">📅 ${sess.date} (Day ${sess.day})</div>
-                        <div style="display: flex; flex-direction: column; gap: 8px;">${exHtml}</div>
+            // Stats Cards
+            document.getElementById("c1Val").innerText = (s.total_days || 0) + " Days";
+            document.getElementById("c1Sub").innerText = (s.this_year_days || 0) + " this year · " + (s.this_month_days || 0) + " this month";
+
+            document.getElementById("c2Val").innerText = (s.current_split_weeks || 0).toFixed(1) + " Weeks";
+            document.getElementById("c2Sub").innerText = (s.cycle_length || "N/A") + "-Day Split · started " + (s.current_split_start || "N/A");
+
+            document.getElementById("c3Val").innerText = s.latest_workout_date || "N/A";
+            document.getElementById("c3Sub").innerText = "Day " + (s.latest_workout_day || "N/A");
+
+            // Workout Cards
+            const grid = document.getElementById("sessionsGrid");
+            grid.innerHTML = "";
+            (data.sessions || []).forEach(sess => {
+                const isPR = typeof sess.day === 'string' && sess.day.toUpperCase() === 'PR';
+                const card = document.createElement("div");
+                card.className = "workout-card" + (isPR ? " pr-card" : "");
+                
+                let exsHtml = "";
+                sess.exercises.forEach(ex => {
+                    exsHtml += `
+                        <div class="ex-item">
+                            <span class="ex-name">${ex.name}</span>
+                            <span class="ex-meta">${ex.reps} @ ${ex.mass}</span>
+                        </div>
                     `;
-                    sc.appendChild(card);
                 });
-            }
-
-            // Split Overview Tab
-            document.getElementById("splitOverviewText").innerHTML = `
-                • Active Split Duration: <b>${(s.current_split_weeks || 0).toFixed(1)} Weeks</b> (Started ${s.current_split_start || "N/A"})<br>
-                • Detected Cycle Length: <b>${s.cycle_length || "N/A"} Days</b><br>
-                • Total Recorded Sessions: <b>${s.total_days || 0}</b>
-            `;
-            const splitTbody = document.getElementById("splitHistoryTbody");
-            splitTbody.innerHTML = "";
-            (s.split_sessions_details || []).slice().reverse().forEach(row => {
-                const tr = document.createElement("tr");
-                tr.innerHTML = `<td>${row.date_str}</td><td>Day ${row.day}</td><td>${row.exercises ? row.exercises.length : 0}</td>`;
-                splitTbody.appendChild(tr);
+                
+                const hdrStr = typeof sess.day === 'number' ? `📅  ${sess.date}  ·  Day ${sess.day}` : `📅  ${sess.date}  ·  ${sess.day}`;
+                card.innerHTML = `
+                    <div class="workout-card-hdr">${hdrStr}</div>
+                    <div class="card-sep"></div>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">${exsHtml}</div>
+                `;
+                grid.appendChild(card);
             });
 
-            setStatus("Ready — Profile: " + data.profile_name);
+            document.getElementById("sidebarStatus").innerText = "Ready (" + data.profile_name + ")";
         }
 
         async function generateExcel() {
-            setStatus("Generating Excel report in background...");
-            showToast("Generating Excel file...");
+            document.getElementById("sidebarStatus").innerText = "Generating Excel Log...";
             const res = await pywebview.api.generate_excel();
             if (res.success) {
-                setStatus("✅ Created Excel log: " + res.filename);
-                showToast("Excel Log generated successfully!");
+                document.getElementById("sidebarStatus").innerText = "✅ Created Excel log!";
+                document.getElementById("sidebarLastGen").innerText = "Last gen: " + res.time;
             } else {
-                setStatus("Error: " + res.error);
                 alert("Excel Generation Error:\\n" + res.error);
+                document.getElementById("sidebarStatus").innerText = "Error";
             }
         }
 
-        async function loadPlanner() {
+        async function openPlanCycler() {
             const res = await pywebview.api.get_plan();
             if (!res.success) {
-                document.getElementById("plannerDays").innerHTML = `<div style="color: #EF4444;">${res.error}</div>`;
+                alert(res.error);
                 return;
             }
             currentPlan = res.planned;
-            renderPlanner();
+            document.getElementById("cyclerTitle").innerText = "Plan Next Cycle (" + res.why + ")";
+            renderCycler();
+            document.getElementById("modalCycler").classList.add("active");
         }
 
-        function renderPlanner() {
-            const container = document.getElementById("plannerDays");
-            container.innerHTML = "";
+        function renderCycler() {
+            const c = document.getElementById("cyclerDaysContainer");
+            c.innerHTML = "";
             currentPlan.forEach((day, dIdx) => {
-                const dayBox = document.createElement("div");
-                dayBox.className = "stat-card";
-                let rowsHtml = "";
+                const box = document.createElement("div");
+                box.className = "plan-day-box";
+                let rows = "";
                 day.exercises.forEach((ex, eIdx) => {
-                    rowsHtml += `
-                        <tr style="border-bottom: 1px solid #27272A;">
-                            <td>
-                                <button class="btn btn-sm" onclick="movePlanEx(${dIdx}, ${eIdx}, -1)">▲</button>
-                                <button class="btn btn-sm" onclick="movePlanEx(${dIdx}, ${eIdx}, 1)">▼</button>
+                    rows += `
+                        <tr>
+                            <td style="width: 55px;">
+                                <button class="btn-ctrl" onclick="moveEx(${dIdx}, ${eIdx}, -1)">▲</button>
+                                <button class="btn-ctrl" onclick="moveEx(${dIdx}, ${eIdx}, 1)">▼</button>
                             </td>
                             <td><input type="text" value="${ex.var_name}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].var_name = this.value" style="width: 100%;"></td>
-                            <td><input type="text" value="${ex.sets}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].sets = this.value" style="width: 50px;"></td>
-                            <td><input type="text" value="${ex.reps}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].reps = this.value" style="width: 80px;"></td>
-                            <td><input type="text" value="${ex.mass}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].mass = this.value" style="width: 80px;"></td>
-                            <td><input type="text" value="${ex.comment || ''}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].comment = this.value" style="width: 120px;"></td>
-                            <td><button class="btn btn-sm btn-danger" onclick="removePlanEx(${dIdx}, ${eIdx})">✕</button></td>
+                            <td style="width: 50px;"><input type="text" value="${ex.sets}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].sets = this.value" style="width: 45px;"></td>
+                            <td style="width: 95px;"><input type="text" value="${ex.reps}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].reps = this.value" style="width: 85px;"></td>
+                            <td style="width: 100px;"><input type="text" value="${ex.mass}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].mass = this.value" style="width: 90px;"></td>
+                            <td><input type="text" value="${ex.comment || ''}" onchange="currentPlan[${dIdx}].exercises[${eIdx}].comment = this.value" style="width: 100%;"></td>
+                            <td style="width: 75px;">
+                                <button class="btn-ctrl" onclick="addMass(${dIdx}, ${eIdx}, 2.5)">+2.5</button>
+                                <button class="btn-del" onclick="removeEx(${dIdx}, ${eIdx})">✕</button>
+                            </td>
                         </tr>
                     `;
                 });
 
-                dayBox.innerHTML = `
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <span style="font-weight: bold; color: #38BDF8;">Day ${day.day_num}</span>
-                        <input type="text" value="${day.date_str}" onchange="currentPlan[${dIdx}].date_str = this.value" placeholder="YYYY-MM-DD" style="width: 120px;">
-                        <button class="btn btn-sm" onclick="addPlanEx(${dIdx})">+ Add Exercise</button>
-                        <button class="btn btn-sm btn-danger" onclick="removePlanDay(${dIdx})">Delete Day</button>
+                box.innerHTML = `
+                    <div class="plan-day-hdr">
+                        <div class="day-badge">Day ${day.day_num}</div>
+                        <span style="font-size: 12px; color: #aaa;">Date:</span>
+                        <input type="text" value="${day.date_str}" onchange="currentPlan[${dIdx}].date_str = this.value" style="width: 110px;">
+                        <button class="btn-add-ex" style="margin-left: auto;" onclick="addEx(${dIdx})">+ Add Exercise</button>
+                        <button class="btn-del" onclick="removeDay(${dIdx})">🗑️</button>
                     </div>
                     <table>
                         <thead>
                             <tr>
-                                <th style="width: 60px;">Order</th>
-                                <th>Exercise Variable</th>
-                                <th style="width: 60px;">Sets</th>
-                                <th style="width: 90px;">Reps</th>
-                                <th style="width: 90px;">Mass</th>
-                                <th>Comment</th>
-                                <th style="width: 40px;">Del</th>
+                                <th>Order</th><th>Exercise Name / Slug</th><th>Sets</th><th>Reps</th><th>Mass</th><th>Comment</th><th>Actions</th>
                             </tr>
                         </thead>
-                        <tbody>${rowsHtml}</tbody>
+                        <tbody>${rows}</tbody>
                     </table>
                 `;
-                container.appendChild(dayBox);
+                c.appendChild(box);
             });
         }
 
-        function movePlanEx(dIdx, eIdx, dir) {
-            const arr = currentPlan[dIdx].exercises;
-            const target = eIdx + dir;
+        function moveEx(d, e, dir) {
+            const arr = currentPlan[d].exercises;
+            const target = e + dir;
             if (target >= 0 && target < arr.length) {
-                const temp = arr[eIdx];
-                arr[eIdx] = arr[target];
-                arr[target] = temp;
-                renderPlanner();
+                const tmp = arr[e];
+                arr[e] = arr[target];
+                arr[target] = tmp;
+                renderCycler();
             }
         }
 
-        function addPlanEx(dIdx) {
-            currentPlan[dIdx].exercises.push({ var_name: "exercise", sets: 3, reps: "5", mass: "0", comment: "" });
-            renderPlanner();
+        function addEx(d) {
+            currentPlan[d].exercises.push({ var_name: "exercise", sets: 3, reps: "5", mass: "0", comment: "" });
+            renderCycler();
         }
 
-        function removePlanEx(dIdx, eIdx) {
-            currentPlan[dIdx].exercises.splice(eIdx, 1);
-            renderPlanner();
+        function removeEx(d, e) {
+            currentPlan[d].exercises.splice(e, 1);
+            renderCycler();
         }
 
-        function addPlanDay() {
+        function addDay() {
             currentPlan.push({ day_num: currentPlan.length + 1, date_str: "", exercises: [] });
-            renderPlanner();
+            renderCycler();
         }
 
-        function removePlanDay(dIdx) {
-            currentPlan.splice(dIdx, 1);
-            currentPlan.forEach((d, i) => d.day_num = i + 1);
-            renderPlanner();
+        function removeDay(d) {
+            currentPlan.splice(d, 1);
+            currentPlan.forEach((x, i) => x.day_num = i + 1);
+            renderCycler();
+        }
+
+        function addMass(d, e, delta) {
+            const m = parseFloat(currentPlan[d].exercises[e].mass) || 0;
+            currentPlan[d].exercises[e].mass = (m + delta).toString();
+            renderCycler();
         }
 
         function applyDeload() {
@@ -457,58 +530,63 @@ HTML_TEMPLATE = """
                     }
                 });
             });
-            renderPlanner();
-            showToast("Applied 10% deload to planned exercises!");
+            renderCycler();
         }
 
-        async function savePlan() {
+        async function saveCyclerPlan() {
             const res = await pywebview.api.save_plan(currentPlan);
             if (res.success) {
-                showToast("Plan successfully saved to sessions.py!");
-                setStatus("✅ Plan saved!");
-                switchTab('dashboard', document.querySelectorAll('.tab-btn')[0]);
-                await loadDashboardData();
+                closeModal('modalCycler');
+                await loadDashboard();
             } else {
                 alert("Error saving plan: " + res.error);
             }
         }
 
-        async function onStandardsSearch(q) {
-            const data = await pywebview.api.search_standards(q);
-            const tbody = document.getElementById("standardsTbody");
+        async function openStandardsModal() {
+            await filterStandards("");
+            document.getElementById("modalStandards").classList.add("active");
+        }
+
+        async function filterStandards(q) {
+            const list = await pywebview.api.search_standards(q);
+            const tbody = document.getElementById("stdTbody");
             tbody.innerHTML = "";
-            data.forEach(row => {
+            list.forEach(row => {
                 const tr = document.createElement("tr");
-                const pyCode = `${row.slug.replace(/-/g, '_')} = "${row.slug}"`;
+                const py = `${row.slug.replace(/-/g, '_')} = "${row.slug}"`;
                 tr.innerHTML = `
                     <td>${row.name}</td>
                     <td style="color: #38BDF8;">${row.slug}</td>
-                    <td>${row.beg}</td>
-                    <td>${row.nov}</td>
-                    <td>${row.int}</td>
-                    <td>${row.adv}</td>
-                    <td>${row.eli}</td>
+                    <td>${row.beg}</td><td>${row.nov}</td><td>${row.int}</td><td>${row.adv}</td><td>${row.eli}</td>
                     <td>
-                        <button class="btn btn-sm" onclick="copySlug('${row.slug}')">Copy</button>
-                        <button class="btn btn-sm btn-success" onclick="copyPy('${pyCode}')">Copy Py</button>
-                        <button class="btn btn-sm" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${row.slug}')">View</button>
+                        <button class="btn-ctrl" onclick="pywebview.api.copy_clipboard('${row.slug}')">Copy</button>
+                        <button class="btn-ctrl" style="background: #1B5E20;" onclick="pywebview.api.copy_clipboard('${py}')">Copy Py</button>
+                        <button class="btn-ctrl" style="background: #1565C0;" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${row.slug}')">View</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
             });
         }
 
-        function copySlug(s) {
-            pywebview.api.copy_to_clipboard(s);
-            showToast(`Copied '${s}' to clipboard!`);
+        function openSplitModal() {
+            const s = cachedStats;
+            document.getElementById("splitOverview").innerHTML = `
+                • Active Split Duration: <b>${(s.current_split_weeks || 0).toFixed(1)} Weeks</b> (Started ${s.current_split_start || "N/A"})<br>
+                • Detected Cycle Length: <b>${s.cycle_length || "N/A"} Days</b><br>
+                • Total Recorded Sessions: <b>${s.total_days || 0}</b>
+            `;
+            const tb = document.getElementById("splitTbody");
+            tb.innerHTML = "";
+            (s.split_sessions_details || []).slice().reverse().forEach(row => {
+                const tr = document.createElement("tr");
+                tr.innerHTML = `<td>${row.date_str}</td><td>Day ${row.day}</td><td>${row.exercises ? row.exercises.length : 0}</td>`;
+                tb.appendChild(tr);
+            });
+            document.getElementById("modalSplit").classList.add("active");
         }
 
-        function copyPy(c) {
-            pywebview.api.copy_to_clipboard(c);
-            showToast(`Copied '${c}' to clipboard!`);
-        }
-
-        window.addEventListener('pywebviewready', initApp);
+        window.addEventListener('pywebviewready', init);
     </script>
 </body>
 </html>
@@ -516,27 +594,14 @@ HTML_TEMPLATE = """
 
 
 class WebViewBridgeApi:
-    """Python backend methods exposed directly to JavaScript in the PyWebView window."""
+    """Python backend bridge API matching the CustomTkinter engine features."""
 
     def __init__(self):
         self.manager = ProfileManager()
+        self.last_gen_time = ""
 
-    def get_profiles(self) -> Dict[str, Any]:
-        return {
-            "profiles": [p.to_dict() for p in self.manager.profiles],
-            "active_index": self.manager.active_profile_index,
-        }
-
-    def select_profile(self, index: int) -> Dict[str, Any]:
-        self.manager.set_active(index)
-        return {"success": True}
-
-    def create_profile(self, name: str) -> Dict[str, Any]:
-        self.manager.add_profile(Profile(name=name, sessions_dir="", output_dir="", sex="male"))
-        return {"success": True}
-
-    def _load_sessions(self, profile: Profile):
-        sessions_file = getattr(profile, "sessions_file", None) or os.path.join(profile.sessions_dir, "sessions.py")
+    def _load_sessions(self, p: Profile):
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
         if not os.path.exists(sessions_file):
             return None, sessions_file
 
@@ -544,7 +609,6 @@ class WebViewBridgeApi:
         if sessions_dir not in sys.path:
             sys.path.insert(0, sessions_dir)
 
-        import importlib
         if "sessions" in sys.modules:
             sess = importlib.reload(sys.modules["sessions"])
         else:
@@ -563,7 +627,6 @@ class WebViewBridgeApi:
         user_data = getattr(sess, "USER_DATA", {})
         stats = calculate_gym_stats(user_data)
 
-        # Prepare serializable sessions list
         date_pat = re.compile(r"^\d{4}-\d{2}-\d{2}$")
         sorted_dates = sorted([d for d in user_data.keys() if date_pat.match(d)], reverse=True)
         N, _ = detect_cycle(user_data)
@@ -577,10 +640,9 @@ class WebViewBridgeApi:
                 if not isinstance(log, Log):
                     continue
                 info = EXERCISE_STANDARDS.get(ex_id, {})
-                reps_str = ",".join(str(r) for r in log.reps)
+                reps_str = "-".join(str(r) for r in log.reps) if len(set(log.reps)) > 1 else f"{len(log.reps)} × {log.reps[0]}"
                 mass_str = f"{log.mass[0]}kg" if log.mass and max(log.mass) > 0 else "BW"
                 exs.append({
-                    "id": ex_id,
                     "name": info.get("name", ex_id),
                     "reps": reps_str,
                     "mass": mass_str,
@@ -591,28 +653,17 @@ class WebViewBridgeApi:
                 "exercises": exs,
             })
 
-        # Body mass
-        bm_log = getattr(sess, "BODYMASS_LOG", {})
-        current_mass = p.mass
-        if bm_log:
-            sorted_bm = sorted(bm_log.items(), key=lambda x: str(x[0]), reverse=True)
-            current_mass = sorted_bm[0][1]
-
-        # Make stats JSON serializable
         clean_stats = {
             "total_days": stats.get("total_days", 0),
             "this_year_days": stats.get("this_year_days", 0),
-            "latest_workout_date": stats.get("latest_workout_date", "--"),
-            "latest_workout_day": stats.get("latest_workout_day", ""),
+            "this_month_days": stats.get("this_month_days", 0),
+            "latest_workout_date": stats.get("latest_workout_date", "N/A"),
+            "latest_workout_day": stats.get("latest_workout_day", "N/A"),
             "current_split_weeks": stats.get("current_split_weeks", 0.0),
             "current_split_start": stats.get("current_split_start", "N/A"),
             "cycle_length": stats.get("cycle_length", "N/A"),
             "split_sessions_details": [
-                {
-                    "date_str": s.get("date_str", ""),
-                    "day": s.get("day", ""),
-                    "exercises": list(s.get("exercises", [])),
-                }
+                {"date_str": s.get("date_str", ""), "day": s.get("day", ""), "exercises": list(s.get("exercises", []))}
                 for s in stats.get("split_sessions_details", [])
             ],
         }
@@ -622,13 +673,12 @@ class WebViewBridgeApi:
             "profile_name": p.name,
             "stats": clean_stats,
             "sessions": recent_sessions,
-            "current_mass": current_mass,
         }
 
     def generate_excel(self) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
         if not p:
-            return {"success": False, "error": "No profile selected"}
+            return {"success": False, "error": "No profile"}
 
         sess, _ = self._load_sessions(p)
         if not sess:
@@ -654,12 +704,83 @@ class WebViewBridgeApi:
             processor.write_user_profile()
             processor.save()
 
+            self.last_gen_time = datetime.now().strftime("%Y-%m-%d %H:%M")
             try:
                 os.startfile(filename)
             except Exception:
                 pass
 
-            return {"success": True, "filename": filename}
+            return {"success": True, "time": self.last_gen_time}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def get_plan(self) -> Dict[str, Any]:
+        p = self.manager.get_active_profile()
+        if not p:
+            return {"success": False, "error": "No profile"}
+
+        sess, file_path = self._load_sessions(p)
+        if not sess:
+            return {"success": False, "error": "Could not load sessions.py"}
+
+        user_data = getattr(sess, "USER_DATA", {})
+        N, last_day_int = detect_cycle(user_data)
+        if N is None:
+            return {"success": False, "error": "Could not detect your split cycle yet."}
+
+        day_nums = days_to_generate(N, last_day_int)
+        if not day_nums:
+            return {"success": False, "error": "All days in current cycle are already planned."}
+
+        try:
+            planned = build_planned_sessions(file_path, day_nums)
+            why = f"Starting new cycle — all {N} days" if (last_day_int or 0) >= N else f"Completing cycle of {N}"
+            serializable_plan = [
+                {
+                    "day_num": ps.day_num,
+                    "date_str": ps.date_str,
+                    "exercises": [
+                        {
+                            "var_name": ex.var_name,
+                            "sets": ex.sets,
+                            "reps": ex.reps,
+                            "mass": ex.mass,
+                            "comment": ex.comment,
+                        }
+                        for ex in ps.exercises
+                    ],
+                }
+                for ps in planned
+            ]
+            return {"success": True, "planned": serializable_plan, "why": why}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def save_plan(self, planned_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        p = self.manager.get_active_profile()
+        if not p:
+            return {"success": False, "error": "No profile"}
+
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
+        try:
+            planned_objs = []
+            for d in planned_data:
+                ex_objs = [
+                    PlannedExercise(
+                        var_name=e.get("var_name", "exercise"),
+                        sets=int(e.get("sets", 3)),
+                        reps=str(e.get("reps", "5")),
+                        mass=str(e.get("mass", "0")),
+                        comment=str(e.get("comment", "")),
+                    )
+                    for e in d.get("exercises", [])
+                ]
+                planned_objs.append(
+                    PlannedSession(day_num=int(d.get("day_num", 1)), date_str=d.get("date_str", ""), exercises=ex_objs)
+                )
+
+            write_planned_sessions(sessions_file, planned_objs)
+            return {"success": True}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
@@ -691,76 +812,7 @@ class WebViewBridgeApi:
             })
         return results
 
-    def get_plan(self) -> Dict[str, Any]:
-        p = self.manager.get_active_profile()
-        if not p:
-            return {"success": False, "error": "No profile selected"}
-
-        sess, file_path = self._load_sessions(p)
-        if not sess:
-            return {"success": False, "error": "Could not load sessions.py"}
-
-        user_data = getattr(sess, "USER_DATA", {})
-        N, last_day = detect_cycle(user_data)
-        if N is None:
-            return {"success": False, "error": "Cycle length unknown — complete at least 1 cycle"}
-
-        day_nums = days_to_generate(N, last_day)
-        if not day_nums:
-            return {"success": False, "error": "All days in current cycle are already planned"}
-
-        try:
-            planned = build_planned_sessions(file_path, day_nums)
-            serializable_plan = [
-                {
-                    "day_num": ps.day_num,
-                    "date_str": ps.date_str,
-                    "exercises": [
-                        {
-                            "var_name": ex.var_name,
-                            "sets": ex.sets,
-                            "reps": ex.reps,
-                            "mass": ex.mass,
-                            "comment": ex.comment,
-                        }
-                        for ex in ps.exercises
-                    ],
-                }
-                for ps in planned
-            ]
-            return {"success": True, "planned": serializable_plan}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def save_plan(self, planned_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        p = self.manager.get_active_profile()
-        if not p:
-            return {"success": False, "error": "No profile selected"}
-
-        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
-        try:
-            planned_objs = []
-            for d in planned_data:
-                ex_objs = [
-                    PlannedExercise(
-                        var_name=e.get("var_name", "exercise"),
-                        sets=int(e.get("sets", 3)),
-                        reps=str(e.get("reps", "5")),
-                        mass=str(e.get("mass", "0")),
-                        comment=str(e.get("comment", "")),
-                    )
-                    for e in d.get("exercises", [])
-                ]
-                planned_objs.append(
-                    PlannedSession(day_num=int(d.get("day_num", 1)), date_str=d.get("date_str", ""), exercises=ex_objs)
-                )
-
-            write_planned_sessions(sessions_file, planned_objs)
-            return {"success": True}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
-
-    def copy_to_clipboard(self, text: str):
+    def copy_clipboard(self, text: str):
         import tkinter as tk
         r = tk.Tk()
         r.withdraw()
@@ -772,12 +824,19 @@ class WebViewBridgeApi:
     def open_url(self, url: str):
         webbrowser.open(url)
 
+    def open_latest_excel(self):
+        p = self.manager.get_active_profile()
+        if p and p.output_dir and os.path.exists(p.output_dir):
+            files = sorted(glob.glob(os.path.join(p.output_dir, "Training_Log_*.xlsx")), reverse=True)
+            if files:
+                os.startfile(files[0])
+
     def edit_sessions(self):
         p = self.manager.get_active_profile()
         if p and p.sessions_dir:
-            file_path = os.path.join(p.sessions_dir, "sessions.py")
-            if os.path.exists(file_path):
-                os.startfile(file_path)
+            f = os.path.join(p.sessions_dir, "sessions.py")
+            if os.path.exists(f):
+                os.startfile(f)
 
     def open_output(self):
         p = self.manager.get_active_profile()
@@ -794,7 +853,7 @@ def run_webview_app():
         width=1100,
         height=720,
         min_size=(960, 580),
-        background_color="#121214",
+        background_color="#121212",
     )
     webview.start(debug=False)
 

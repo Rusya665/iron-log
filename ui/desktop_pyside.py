@@ -1,18 +1,20 @@
 """PySide6 (Qt 6) Desktop GUI Implementation for Iron Log.
 
-Provides a high-performance C++ backend UI with smooth 60fps rendering,
-declarative QSS dark theme, non-blocking background workers, and full feature parity.
+Styled to precisely match the CustomTkinter layout, colors, sidebar,
+and interactive workflow (including the Dynamic Plan Cycler).
 """
 
+import copy
+import importlib
 import os
 import re
 import sys
 import threading
 import webbrowser
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
-from PySide6.QtCore import QObject, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
+from PySide6.QtCore import QObject, QPoint, QRect, QRunnable, QSize, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtGui import QAction, QColor, QCursor, QFont, QIcon, QKeySequence
 from PySide6.QtWidgets import (
     QApplication,
@@ -31,7 +33,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QMessageBox,
-    QProgressBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -39,8 +40,7 @@ from PySide6.QtWidgets import (
     QStatusBar,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
-    QTextEdit,
+    QToolTip,
     QVBoxLayout,
     QWidget,
 )
@@ -50,7 +50,6 @@ from core.plan_generator import (
     PlannedExercise,
     PlannedSession,
     build_planned_sessions,
-    build_pre_deload_baseline,
     calculate_gym_stats,
     days_to_generate,
     detect_cycle,
@@ -62,256 +61,208 @@ from core.standards import EXERCISE_STANDARDS, get_exercise_standard, get_tiered
 from core.version import __version__
 from core.xlsx_generator import TrainingLogProcessor
 
-PYSIDE_DARK_QSS = """
+CTK_MATCHING_QSS = """
 QMainWindow, QDialog {
-    background-color: #121214;
-    color: #F4F4F5;
-    font-family: 'Segoe UI', -apple-system, sans-serif;
+    background-color: #121212;
+    color: #FFFFFF;
+    font-family: 'Roboto', 'Segoe UI', sans-serif;
 }
 QWidget {
-    color: #E4E4E7;
-    font-size: 13px;
+    color: #FFFFFF;
+    font-size: 12px;
 }
-QFrame#CardFrame {
-    background-color: #18181B;
-    border: 1px solid #27272A;
-    border-radius: 8px;
+/* Left Sidebar */
+QFrame#Sidebar {
+    background-color: #161616;
+    border-right: 1px solid #222222;
 }
-QFrame#StatCard {
-    background-color: #18181B;
-    border: 1px solid #27272A;
-    border-radius: 8px;
-    padding: 8px;
-}
-QFrame#SessionCard {
-    background-color: #1C1C20;
-    border: 1px solid #2E2E35;
-    border-radius: 8px;
-}
-QLabel#CardTitle {
-    color: #A1A1AA;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-}
-QLabel#CardValue {
-    color: #38BDF8;
-    font-size: 18px;
+QLabel#ProfileTitle {
+    font-size: 17px;
     font-weight: bold;
+    color: #FFFFFF;
 }
-QLabel#CardSub {
-    color: #71717A;
+QLabel#AppSubtitle {
     font-size: 11px;
+    color: #555555;
 }
-QPushButton {
-    background-color: #27272A;
-    color: #F4F4F5;
-    border: 1px solid #3F3F46;
-    border-radius: 6px;
-    padding: 6px 14px;
-    font-weight: 600;
-    font-size: 12px;
+QFrame#Divider {
+    background-color: #2E2E2E;
+    max-height: 1px;
+    min-height: 1px;
 }
-QPushButton:hover {
-    background-color: #3F3F46;
-    border-color: #52525B;
-}
-QPushButton:pressed {
-    background-color: #18181B;
-}
-QPushButton#PrimaryBtn {
-    background-color: #2563EB;
+/* Primary Action Buttons */
+QPushButton#PrimaryAction1 {
+    background-color: #1565C0;
     color: #FFFFFF;
-    border: 1px solid #3B82F6;
-}
-QPushButton#PrimaryBtn:hover {
-    background-color: #1D4ED8;
-}
-QPushButton#SuccessBtn {
-    background-color: #15803D;
-    color: #FFFFFF;
-    border: 1px solid #22C55E;
-}
-QPushButton#SuccessBtn:hover {
-    background-color: #166534;
-}
-QPushButton#DangerBtn {
-    background-color: #991B1B;
-    color: #FFFFFF;
-    border: 1px solid #EF4444;
-}
-QPushButton#DangerBtn:hover {
-    background-color: #7F1D1D;
-}
-QPushButton#SmallToolBtn {
-    background-color: #27272A;
-    color: #D4D4D8;
-    border: 1px solid #3F3F46;
-    border-radius: 4px;
-    padding: 2px 6px;
-    font-size: 11px;
-}
-QPushButton#SmallToolBtn:hover {
-    background-color: #3B82F6;
-    color: #FFFFFF;
-}
-QLineEdit, QComboBox {
-    background-color: #1C1C20;
-    color: #F4F4F5;
-    border: 1px solid #3F3F46;
-    border-radius: 6px;
-    padding: 5px 10px;
-    font-size: 12px;
-}
-QLineEdit:focus, QComboBox:focus {
-    border: 1px solid #3B82F6;
-}
-QComboBox::drop-down {
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: 8px;
+    padding: 10px;
     border: none;
 }
-QComboBox QAbstractItemView {
-    background-color: #18181B;
-    color: #F4F4F5;
-    selection-background-color: #2563EB;
-    border: 1px solid #3F3F46;
+QPushButton#PrimaryAction1:hover {
+    background-color: #1976D2;
+}
+QPushButton#PrimaryAction2 {
+    background-color: #6A1B9A;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: 8px;
+    padding: 10px;
+    border: none;
+}
+QPushButton#PrimaryAction2:hover {
+    background-color: #7B1FA2;
+}
+QPushButton#PrimaryAction3 {
+    background-color: #1B5E20;
+    color: #FFFFFF;
+    font-size: 13px;
+    font-weight: bold;
+    border-radius: 8px;
+    padding: 10px;
+    border: none;
+}
+QPushButton#PrimaryAction3:hover {
+    background-color: #2E7D32;
+}
+/* Secondary Action Buttons */
+QPushButton#SecondaryAction {
+    background-color: #252525;
+    color: #BBBBBB;
+    font-size: 12px;
+    border-radius: 7px;
+    padding: 8px 12px;
+    text-align: left;
+    border: none;
+}
+QPushButton#SecondaryAction:hover {
+    background-color: #333333;
+    color: #FFFFFF;
+}
+/* Cards */
+QFrame#StatCard {
+    background-color: #1C1C1E;
+    border: 1px solid #2E2E2E;
+    border-radius: 10px;
+}
+QFrame#StatCard:hover {
+    background-color: #222224;
+}
+QLabel#StatCardTitle {
+    font-size: 10px;
+    font-weight: bold;
+    color: #777777;
+    text-transform: uppercase;
+}
+QLabel#StatCardValue {
+    font-size: 24px;
+    font-weight: bold;
+    color: #FFFFFF;
+}
+QLabel#StatCardSub {
+    font-size: 11px;
+    color: #555555;
+}
+QFrame#WorkoutCard {
+    background-color: #1C1C1E;
+    border: 1px solid #2E2E2E;
+    border-radius: 10px;
+}
+QFrame#WorkoutCardPR {
+    background-color: #2A1A00;
+    border: 1px solid #5A3000;
+    border-radius: 10px;
+}
+QLabel#WorkoutHeader {
+    font-size: 13px;
+    font-weight: bold;
+    color: #FFFFFF;
+}
+QLabel#WorkoutHeaderPR {
+    font-size: 13px;
+    font-weight: bold;
+    color: #B45309;
+}
+QLineEdit {
+    background-color: #252525;
+    color: #FFFFFF;
+    border: 1px solid #3A3A3A;
+    border-radius: 6px;
+    padding: 4px 8px;
+    font-size: 12px;
+}
+QLineEdit:focus {
+    border: 1px solid #1976D2;
 }
 QScrollArea {
     border: none;
     background-color: transparent;
 }
 QScrollBar:vertical, QScrollBar:horizontal {
-    background: #121214;
-    border-radius: 4px;
-}
-QScrollBar:vertical {
+    background: #121212;
     width: 8px;
-}
-QScrollBar:horizontal {
     height: 8px;
 }
 QScrollBar::handle:vertical, QScrollBar::handle:horizontal {
-    background: #3F3F46;
+    background: #333333;
     border-radius: 4px;
-    min-height: 20px;
 }
 QScrollBar::handle:hover {
-    background: #52525B;
-}
-QScrollBar::add-line, QScrollBar::sub-line {
-    border: none;
-    background: none;
+    background: #555555;
 }
 QTableWidget {
-    background-color: #18181B;
-    gridline-color: #27272A;
-    border: 1px solid #27272A;
+    background-color: #181818;
+    gridline-color: #2E2E2E;
+    border: 1px solid #2E2E2E;
     border-radius: 6px;
 }
-QTableWidget::item {
-    padding: 4px;
-}
-QTableWidget::item:selected {
-    background-color: #2563EB;
-}
 QHeaderView::section {
-    background-color: #27272A;
-    color: #E4E4E7;
+    background-color: #252525;
+    color: #FFFFFF;
     font-weight: bold;
     padding: 6px;
     border: none;
-    border-right: 1px solid #3F3F46;
+    border-right: 1px solid #333333;
 }
 QToolTip {
-    background-color: #18181B;
-    color: #F4F4F5;
-    border: 1px solid #3F3F46;
-    border-radius: 4px;
+    background-color: #1C1C1E;
+    color: #FFFFFF;
+    border: 1px solid #333333;
     padding: 6px;
     font-size: 11px;
-}
-QProgressBar {
-    border: 1px solid #3F3F46;
-    border-radius: 4px;
-    text-align: center;
-    background-color: #1C1C20;
-    color: #FFFFFF;
-    font-size: 11px;
-}
-QProgressBar::chunk {
-    background-color: #3B82F6;
-    border-radius: 3px;
 }
 """
 
 
-class WorkerSignals(QObject):
-    finished = Signal(object)
-    error = Signal(str)
-    progress = Signal(str)
-
-
-class ExcelWorker(QRunnable):
-    def __init__(self, profile: Profile, sessions_module):
-        super().__init__()
-        self.profile = profile
-        self.sessions = sessions_module
-        self.signals = WorkerSignals()
-
-    def run(self):
-        try:
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-            filename = os.path.join(
-                self.profile.output_dir, f"Training_Log_{timestamp}.xlsx"
-            )
-            processor = TrainingLogProcessor(
-                filename,
-                self.sessions.EXERCISE_REGISTRY,
-                self.sessions.USER_DATA,
-                self.sessions.BODYMASS_LOG,
-                self.profile.to_dict(),
-            )
-            processor.validate_data()
-            processor.write_headers()
-            processor.process_data(self.sessions.USER_DATA)
-            processor.write_calculations()
-            processor.generate_charts()
-            processor.write_definitions()
-            processor.write_personal_records()
-            processor.write_user_profile()
-            processor.save()
-            self.signals.finished.emit(filename)
-        except Exception as e:
-            self.signals.error.emit(str(e))
-
-
 class PySideStandardsDialog(QDialog):
-    """Strength Standards Browser with instant search and Copy Py variable generator."""
+    """Exercise standards browser matching CTk style."""
 
     def __init__(self, parent=None, user_sex="male", user_mass=80.0):
         super().__init__(parent)
-        self.setWindowTitle("Exercise Standards Library — PySide6")
-        self.resize(780, 560)
+        self.setWindowTitle("Strength Standards Browser — PySide6")
+        self.resize(800, 560)
         self.user_sex = user_sex
         self.user_mass = user_mass
 
         layout = QVBoxLayout(self)
-        layout.setSpacing(10)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
 
         # Search Bar
-        search_frame = QHBoxLayout()
-        lbl = QLabel("Search Exercises:")
-        lbl.setStyleSheet("font-weight: bold; font-size: 13px;")
-        search_frame.addWidget(lbl)
+        search_layout = QHBoxLayout()
+        lbl = QLabel("Search:")
+        lbl.setStyleSheet("font-size: 13px; font-weight: bold;")
+        search_layout.addWidget(lbl)
 
-        self.search_entry = QLineEdit()
-        self.search_entry.setPlaceholderText("Type exercise name or slug (e.g. bench press, squat, pull up)...")
-        self.search_entry.textChanged.connect(self._filter_exercises)
-        search_frame.addWidget(self.search_entry)
+        self.search_in = QLineEdit()
+        self.search_in.setPlaceholderText("Filter exercises (e.g. bench press, squat)...")
+        self.search_in.textChanged.connect(self._filter)
+        search_layout.addWidget(self.search_in)
+        layout.addLayout(search_layout)
 
-        layout.addLayout(search_frame)
-
-        # Standards Table
+        # Table
         self.table = QTableWidget()
         self.table.setColumnCount(8)
         self.table.setHorizontalHeaderLabels([
@@ -323,116 +274,96 @@ class PySideStandardsDialog(QDialog):
             self.table.horizontalHeader().setSectionResizeMode(i, QHeaderView.ResizeToContents)
         self.table.horizontalHeader().setSectionResizeMode(7, QHeaderView.ResizeToContents)
         self.table.verticalHeader().setVisible(False)
-        self.table.setAlternatingRowColors(True)
         layout.addWidget(self.table)
 
-        self._populate_all()
+        self._filter("")
 
-    def _populate_all(self):
-        self._filter_exercises(self.search_entry.text())
-
-    def _filter_exercises(self, query: str):
-        q = query.strip().lower()
+    def _filter(self, q: str):
+        q = q.strip().lower()
         self.table.setRowCount(0)
+        row_i = 0
+        target_bm = int(self.user_mass / 5.0) * 5
 
-        row_idx = 0
         for slug, info in EXERCISE_STANDARDS.items():
             name = info.get("name", slug)
             if q and (q not in name.lower() and q not in slug.lower()):
                 continue
 
-            self.table.insertRow(row_idx)
-
-            # Name & Slug
-            name_item = QTableWidgetItem(name)
-            name_item.setToolTip(f"Slug: {slug}")
+            self.table.insertRow(row_i)
+            self.table.setItem(row_i, 0, QTableWidgetItem(name))
+            
             slug_item = QTableWidgetItem(slug)
             slug_item.setForeground(QColor("#38BDF8"))
+            self.table.setItem(row_i, 1, slug_item)
 
-            self.table.setItem(row_idx, 0, name_item)
-            self.table.setItem(row_idx, 1, slug_item)
-
-            # Standards
             standards = get_tiered_standards(slug, self.user_sex, self.user_mass)
-            target_bm = int(self.user_mass / 5.0) * 5
-            level_dict = standards.get(target_bm, {}) if standards else {}
+            lvl_dict = standards.get(target_bm, {}) if standards else {}
 
             for col_i, lvl in enumerate(["Beginner", "Novice", "Intermediate", "Advanced", "Elite"], 2):
-                val = level_dict.get(lvl, "-")
+                val = lvl_dict.get(lvl, "-")
                 item = QTableWidgetItem(f"{val}kg" if isinstance(val, (int, float)) else str(val))
                 item.setTextAlignment(Qt.AlignCenter)
-                self.table.setItem(row_idx, col_i, item)
+                self.table.setItem(row_i, col_i, item)
 
-            # Action Buttons Cell
-            act_widget = QWidget()
-            act_layout = QHBoxLayout(act_widget)
-            act_layout.setContentsMargins(2, 2, 2, 2)
-            act_layout.setSpacing(4)
+            # Actions
+            btn_box = QWidget()
+            b_layout = QHBoxLayout(btn_box)
+            b_layout.setContentsMargins(2, 2, 2, 2)
+            b_layout.setSpacing(4)
 
-            # Copy Slug
-            btn_slug = QPushButton("Copy")
-            btn_slug.setObjectName("SmallToolBtn")
-            btn_slug.clicked.connect(lambda _, s=slug: self._copy_text(s, f"Copied slug '{s}'!"))
-            act_layout.addWidget(btn_slug)
+            b_copy = QPushButton("Copy")
+            b_copy.setStyleSheet("background: #252525; padding: 3px 8px; border-radius: 4px; font-size: 11px;")
+            b_copy.clicked.connect(lambda _, s=slug: self._clip(s, f"Copied slug '{s}'"))
+            b_layout.addWidget(b_copy)
 
-            # Copy Py
-            btn_py = QPushButton("Copy Py")
-            btn_py.setObjectName("SmallToolBtn")
-            btn_py.setStyleSheet("background-color: #15803D; color: white;")
+            b_py = QPushButton("Copy Py")
+            b_py.setStyleSheet("background: #1B5E20; color: white; padding: 3px 8px; border-radius: 4px; font-size: 11px;")
             py_code = f'{slug.replace("-", "_")} = "{slug}"'
-            btn_py.clicked.connect(lambda _, c=py_code: self._copy_text(c, f"Copied '{c}'!"))
-            act_layout.addWidget(btn_py)
+            b_py.clicked.connect(lambda _, c=py_code: self._clip(c, f"Copied '{c}'"))
+            b_layout.addWidget(b_py)
 
-            # View on Web
-            btn_web = QPushButton("View")
-            btn_web.setObjectName("SmallToolBtn")
-            btn_web.clicked.connect(lambda _, s=slug: webbrowser.open(f"https://strengthlevel.com/strength-standards/{s}"))
-            act_layout.addWidget(btn_web)
+            b_view = QPushButton("View")
+            b_view.setStyleSheet("background: #1565C0; padding: 3px 8px; border-radius: 4px; font-size: 11px;")
+            b_view.clicked.connect(lambda _, s=slug: webbrowser.open(f"https://strengthlevel.com/strength-standards/{s}"))
+            b_layout.addWidget(b_view)
 
-            self.table.setCellWidget(row_idx, 7, act_widget)
-            row_idx += 1
+            self.table.setCellWidget(row_i, 7, btn_box)
+            row_i += 1
 
-    def _copy_text(self, text: str, msg: str):
+    def _clip(self, text: str, msg: str):
         QApplication.clipboard().setText(text)
         QMessageBox.information(self, "Clipboard", msg)
 
 
 class PySideSplitDetailsDialog(QDialog):
-    """Split structure, routine breakdown, and historical cycles view."""
+    """Split routine and cycle history dialog."""
 
     def __init__(self, parent=None, stats=None):
         super().__init__(parent)
         self.setWindowTitle("Current Split Details & History — PySide6")
-        self.resize(650, 480)
+        self.resize(620, 460)
         stats = stats or {}
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
-        layout.setContentsMargins(15, 15, 15, 15)
 
-        # Overview Card
         card = QFrame()
-        card.setObjectName("CardFrame")
+        card.setObjectName("StatCard")
         c_layout = QVBoxLayout(card)
+        c_layout.setContentsMargins(14, 14, 14, 14)
 
-        title = QLabel("Split Routine Overview")
-        title.setStyleSheet("font-weight: bold; font-size: 15px; color: #38BDF8;")
-        c_layout.addWidget(title)
+        t = QLabel("CURRENT SPLIT ROUTINE")
+        t.setObjectName("StatCardTitle")
+        c_layout.addWidget(t)
 
         weeks = stats.get("current_split_weeks", 0.0)
-        start = stats.get("current_split_start", "N/A")
-        cycle_len = stats.get("cycle_length", "N/A")
-
-        c_layout.addWidget(QLabel(f"• Active Split Duration: <b>{weeks:.1f} weeks</b> (Started {start})"))
-        c_layout.addWidget(QLabel(f"• Detected Cycle Length: <b>{cycle_len} Days</b>"))
+        c_layout.addWidget(QLabel(f"• Active Split Duration: <b>{weeks:.1f} Weeks</b> (Started {stats.get('current_split_start', 'N/A')})"))
+        c_layout.addWidget(QLabel(f"• Detected Cycle Length: <b>{stats.get('cycle_length', 'N/A')} Days</b>"))
         c_layout.addWidget(QLabel(f"• Total Recorded Sessions: <b>{stats.get('total_days', 0)}</b>"))
         layout.addWidget(card)
 
-        # Sessions history table
-        history_title = QLabel("Recent Split Cycle History:")
-        history_title.setStyleSheet("font-weight: bold;")
-        layout.addWidget(history_title)
-
+        layout.addWidget(QLabel("Recent Split Sessions History:"))
         table = QTableWidget()
         table.setColumnCount(3)
         table.setHorizontalHeaderLabels(["Date", "Day", "Exercises Count"])
@@ -443,167 +374,240 @@ class PySideSplitDetailsDialog(QDialog):
         table.setRowCount(len(sessions))
         for r, s in enumerate(reversed(sessions)):
             table.setItem(r, 0, QTableWidgetItem(s.get("date_str", "")))
-            table.setItem(r, 1, QTableWidgetItem(str(s.get("day", ""))))
+            table.setItem(r, 1, QTableWidgetItem(f"Day {s.get('day', '')}"))
             table.setItem(r, 2, QTableWidgetItem(str(len(s.get("exercises", [])))))
         layout.addWidget(table)
 
 
 class PySideDynamicPlanDialog(QDialog):
-    """Dynamic Workout Cycle Planner with reordering, deloads, and validation."""
+    """Dynamic workout cycle plan generator matching CTk DynamicPlanDialog."""
 
-    def __init__(self, parent, planned: List[PlannedSession], sessions_file_path: str):
+    def __init__(self, parent, file_path: str, planned: List[PlannedSession], title: str = "Plan Next Cycle"):
         super().__init__(parent)
-        self.setWindowTitle("Dynamic Plan Generator — PySide6")
-        self.resize(980, 680)
-        self.planned = planned
-        self.sessions_file_path = sessions_file_path
-        self.row_widgets = []
+        self.setWindowTitle(title)
+        self.resize(980, 700)
+        self.file_path = file_path
+        self.planned = copy.deepcopy(planned)
+        self.confirmed = False
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        # Top Action Bar
-        top_bar = QHBoxLayout()
+        # Header Info Banner
+        hdr_frame = QFrame()
+        hdr_frame.setStyleSheet("background: #1A1A1A; border-radius: 6px; padding: 10px;")
+        h_layout = QVBoxLayout(hdr_frame)
+        h_layout.setContentsMargins(4, 4, 4, 4)
         
-        btn_deload = QPushButton("Deload (-10%)")
-        btn_deload.clicked.connect(self._apply_deload)
-        top_bar.addWidget(btn_deload)
+        t_lbl = QLabel(title)
+        t_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #FFFFFF;")
+        h_layout.addWidget(t_lbl)
 
-        btn_restore = QPushButton("Restore Pre-Deload")
-        btn_restore.clicked.connect(self._restore_pre_deload)
-        top_bar.addWidget(btn_restore)
+        sub_lbl = QLabel("Define your training split. Type exercise variable name, sets, reps, mass, and notes.")
+        sub_lbl.setStyleSheet("font-size: 12px; color: #888888;")
+        h_layout.addWidget(sub_lbl)
+        layout.addWidget(hdr_frame)
 
-        btn_add_day = QPushButton("+ Add Day")
-        btn_add_day.clicked.connect(self._add_day)
-        top_bar.addWidget(btn_add_day)
-
-        top_bar.addStretch()
-
-        btn_save = QPushButton("Save Plan to sessions.py")
-        btn_save.setObjectName("SuccessBtn")
-        btn_save.clicked.connect(self._save_plan)
-        top_bar.addWidget(btn_save)
-
-        layout.addLayout(top_bar)
-
-        # Scroll area containing planned days
+        # Scroll area for planned days
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.container = QWidget()
         self.container_layout = QVBoxLayout(self.container)
-        self.container_layout.setSpacing(15)
+        self.container_layout.setSpacing(12)
         self.scroll.setWidget(self.container)
-        layout.addWidget(self.scroll)
+        layout.addWidget(self.scroll, 1)
+
+        # Footer Actions Bar
+        footer = QFrame()
+        footer.setStyleSheet("background: #111111; padding: 8px; border-top: 1px solid #222;")
+        f_layout = QHBoxLayout(footer)
+        f_layout.setContentsMargins(8, 6, 8, 6)
+
+        btn_cancel = QPushButton("Cancel")
+        btn_cancel.setStyleSheet("background: #333333; color: white; padding: 8px 16px; border-radius: 6px; font-weight: bold;")
+        btn_cancel.clicked.connect(self.reject)
+        f_layout.addWidget(btn_cancel)
+
+        btn_add_day = QPushButton("+ Add Day")
+        btn_add_day.setStyleSheet("background: #6A1B9A; color: white; padding: 8px 16px; border-radius: 6px; font-weight: bold;")
+        btn_add_day.clicked.connect(self._add_day)
+        f_layout.addWidget(btn_add_day)
+
+        btn_deload = QPushButton("🧪 Deload Next Cycle (-10%)")
+        btn_deload.setStyleSheet("background: #333333; color: white; padding: 8px 14px; border-radius: 6px;")
+        btn_deload.clicked.connect(self._prompt_deload)
+        f_layout.addWidget(btn_deload)
+
+        f_layout.addStretch()
+
+        btn_save = QPushButton("✅ Write to sessions.py")
+        btn_save.setStyleSheet("background: #1B5E20; color: white; padding: 8px 24px; border-radius: 6px; font-size: 13px; font-weight: bold;")
+        btn_save.clicked.connect(self._save_plan)
+        f_layout.addWidget(btn_save)
+
+        layout.addWidget(footer)
 
         self._render_plan()
 
     def _render_plan(self):
-        # Clear existing
         while self.container_layout.count():
             item = self.container_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        self.row_widgets.clear()
 
-        for d_idx, ps in enumerate(self.planned):
-            day_card = QFrame()
-            day_card.setObjectName("CardFrame")
-            day_layout = QVBoxLayout(day_card)
-            day_layout.setContentsMargins(12, 12, 12, 12)
-            day_layout.setSpacing(8)
+        for s_idx, ps in enumerate(self.planned):
+            day_box = QFrame()
+            day_box.setStyleSheet("background: #1A1A1A; border: 1px solid #2E2E2E; border-radius: 8px;")
+            d_layout = QVBoxLayout(day_box)
+            d_layout.setContentsMargins(10, 10, 10, 10)
+            d_layout.setSpacing(6)
 
-            # Header row
-            h_row = QHBoxLayout()
-            lbl = QLabel(f"Day {ps.day_num}")
-            lbl.setStyleSheet("font-size: 14px; font-weight: bold; color: #38BDF8;")
-            h_row.addWidget(lbl)
+            # Day Header
+            dh = QFrame()
+            dh.setStyleSheet("background: #222222; border-radius: 6px;")
+            dh_layout = QHBoxLayout(dh)
+            dh_layout.setContentsMargins(10, 6, 10, 6)
 
-            date_input = QLineEdit(ps.date_str)
-            date_input.setPlaceholderText("YYYY-MM-DD")
-            date_input.setFixedWidth(120)
-            date_input.textChanged.connect(lambda val, s=ps: setattr(s, "date_str", val))
-            h_row.addWidget(date_input)
+            day_badge = QLabel(f"Day {ps.day_num}")
+            day_badge.setStyleSheet("background: #00695C; color: white; font-weight: bold; border-radius: 4px; padding: 4px 10px;")
+            dh_layout.addWidget(day_badge)
 
-            h_row.addStretch()
+            dh_layout.addWidget(QLabel("Date:"))
+            d_input = QLineEdit(ps.date_str)
+            d_input.setPlaceholderText("YYYY-MM-DD")
+            d_input.setFixedWidth(110)
+            d_input.textChanged.connect(lambda val, s=ps: setattr(s, "date_str", val))
+            dh_layout.addWidget(d_input)
+
+            dh_layout.addStretch()
 
             btn_add_ex = QPushButton("+ Add Exercise")
-            btn_add_ex.setObjectName("SmallToolBtn")
-            btn_add_ex.clicked.connect(lambda _, s=ps: self._add_exercise(s))
-            h_row.addWidget(btn_add_ex)
+            btn_add_ex.setStyleSheet("background: #0277BD; color: white; padding: 4px 10px; border-radius: 4px; font-weight: bold;")
+            btn_add_ex.clicked.connect(lambda _, s=ps: self._add_ex(s))
+            dh_layout.addWidget(btn_add_ex)
 
-            btn_del_day = QPushButton("Delete Day")
-            btn_del_day.setObjectName("DangerBtn")
-            btn_del_day.clicked.connect(lambda _, idx=d_idx: self._remove_day(idx))
-            h_row.addWidget(btn_del_day)
+            btn_del_day = QPushButton("🗑️")
+            btn_del_day.setStyleSheet("background: #5A1A1A; color: white; padding: 4px 8px; border-radius: 4px;")
+            btn_del_day.clicked.connect(lambda _, idx=s_idx: self._remove_day(idx))
+            dh_layout.addWidget(btn_del_day)
 
-            day_layout.addLayout(h_row)
+            d_layout.addWidget(dh)
 
-            # Exercises rows
-            for ex_idx, ex in enumerate(ps.exercises):
-                row_frame = QFrame()
-                row_frame.setObjectName("SessionCard")
-                r_layout = QHBoxLayout(row_frame)
-                r_layout.setContentsMargins(6, 4, 6, 4)
-                r_layout.setSpacing(6)
+            # Column Headers
+            col_hdr = QWidget()
+            ch_layout = QHBoxLayout(col_hdr)
+            ch_layout.setContentsMargins(4, 2, 4, 2)
+            
+            lbl_order = QLabel("Order")
+            lbl_order.setFixedWidth(55)
+            lbl_order.setStyleSheet("color: #777; font-weight: bold;")
+            ch_layout.addWidget(lbl_order)
 
-                # Up / Down Order buttons
-                btn_up = QPushButton("▲")
-                btn_up.setFixedSize(24, 24)
-                btn_up.clicked.connect(lambda _, s=ps, e=ex: self._move_up(s, e))
-                r_layout.addWidget(btn_up)
+            lbl_name = QLabel("Exercise Name / Slug")
+            lbl_name.setStyleSheet("color: #777; font-weight: bold;")
+            ch_layout.addWidget(lbl_name, 2)
 
-                btn_down = QPushButton("▼")
-                btn_down.setFixedSize(24, 24)
-                btn_down.clicked.connect(lambda _, s=ps, e=ex: self._move_down(s, e))
-                r_layout.addWidget(btn_down)
+            lbl_sets = QLabel("Sets")
+            lbl_sets.setFixedWidth(50)
+            lbl_sets.setStyleSheet("color: #777; font-weight: bold;")
+            ch_layout.addWidget(lbl_sets)
 
-                # Exercise Slug/Name
+            lbl_reps = QLabel("Reps")
+            lbl_reps.setFixedWidth(100)
+            lbl_reps.setStyleSheet("color: #777; font-weight: bold;")
+            ch_layout.addWidget(lbl_reps)
+
+            lbl_mass = QLabel("Mass (kg)")
+            lbl_mass.setFixedWidth(110)
+            lbl_mass.setStyleSheet("color: #777; font-weight: bold;")
+            ch_layout.addWidget(lbl_mass)
+
+            lbl_comm = QLabel("Comment")
+            lbl_comm.setStyleSheet("color: #777; font-weight: bold;")
+            ch_layout.addWidget(lbl_comm, 1)
+
+            lbl_act = QLabel("Actions")
+            lbl_act.setFixedWidth(120)
+            lbl_act.setStyleSheet("color: #777; font-weight: bold;")
+            ch_layout.addWidget(lbl_act)
+
+            d_layout.addWidget(col_hdr)
+
+            # Exercise Rows
+            for ex in ps.exercises:
+                row_w = QWidget()
+                r_layout = QHBoxLayout(row_w)
+                r_layout.setContentsMargins(4, 2, 4, 2)
+
+                # Order Up/Down
+                up_btn = QPushButton("▲")
+                up_btn.setFixedSize(22, 22)
+                up_btn.setStyleSheet("background: #333333; border-radius: 3px;")
+                up_btn.clicked.connect(lambda _, s=ps, e=ex: self._move_up(s, e))
+                r_layout.addWidget(up_btn)
+
+                down_btn = QPushButton("▼")
+                down_btn.setFixedSize(22, 22)
+                down_btn.setStyleSheet("background: #333333; border-radius: 3px;")
+                down_btn.clicked.connect(lambda _, s=ps, e=ex: self._move_down(s, e))
+                r_layout.addWidget(down_btn)
+
+                # Name
                 name_in = QLineEdit(ex.var_name)
-                name_in.setPlaceholderText("Exercise variable")
-                name_in.setMinimumWidth(180)
                 name_in.textChanged.connect(lambda val, e=ex: setattr(e, "var_name", val))
-                r_layout.addWidget(name_in)
+                r_layout.addWidget(name_in, 2)
 
                 # Sets
                 sets_in = QLineEdit(str(ex.sets))
                 sets_in.setFixedWidth(50)
-                sets_in.setPlaceholderText("Sets")
                 sets_in.textChanged.connect(lambda val, e=ex: setattr(e, "sets", val))
                 r_layout.addWidget(sets_in)
 
                 # Reps
                 reps_in = QLineEdit(str(ex.reps))
                 reps_in.setFixedWidth(100)
-                reps_in.setPlaceholderText("Reps (e.g. 5,5,5)")
                 reps_in.textChanged.connect(lambda val, e=ex: setattr(e, "reps", val))
                 r_layout.addWidget(reps_in)
 
                 # Mass
                 mass_in = QLineEdit(str(ex.mass))
-                mass_in.setFixedWidth(100)
-                mass_in.setPlaceholderText("Mass (kg)")
+                mass_in.setFixedWidth(110)
                 mass_in.textChanged.connect(lambda val, e=ex: setattr(e, "mass", val))
                 r_layout.addWidget(mass_in)
 
                 # Comment
-                comm_in = QLineEdit(ex.comment)
-                comm_in.setPlaceholderText("Comment / Note")
+                comm_in = QLineEdit(str(ex.comment))
                 comm_in.textChanged.connect(lambda val, e=ex: setattr(e, "comment", val))
-                r_layout.addWidget(comm_in)
+                r_layout.addWidget(comm_in, 1)
 
-                # Remove button
+                # Quick Actions (+2.5, +1, ✕)
+                btn_p25 = QPushButton("+2.5")
+                btn_p25.setFixedSize(36, 24)
+                btn_p25.setStyleSheet("background: #252525; font-size: 10px; border-radius: 3px;")
+                btn_p25.clicked.connect(lambda _, e=ex, mi=mass_in: self._add_mass(e, mi, 2.5))
+                r_layout.addWidget(btn_p25)
+
                 btn_del = QPushButton("✕")
                 btn_del.setFixedSize(24, 24)
-                btn_del.setObjectName("DangerBtn")
-                btn_del.clicked.connect(lambda _, s=ps, e=ex: self._remove_exercise(s, e))
+                btn_del.setStyleSheet("background: #5A1A1A; color: white; border-radius: 3px; font-weight: bold;")
+                btn_del.clicked.connect(lambda _, s=ps, e=ex: self._remove_ex(s, e))
                 r_layout.addWidget(btn_del)
 
-                day_layout.addWidget(row_frame)
+                d_layout.addWidget(row_w)
 
-            self.container_layout.addWidget(day_card)
+            self.container_layout.addWidget(day_box)
 
         self.container_layout.addStretch()
+
+    def _add_mass(self, ex: PlannedExercise, input_widget: QLineEdit, delta: float):
+        try:
+            m = float(ex.mass)
+            new_m = m + delta
+            ex.mass = str(new_m)
+            input_widget.setText(str(new_m))
+        except ValueError:
+            pass
 
     def _move_up(self, ps: PlannedSession, ex: PlannedExercise):
         idx = ps.exercises.index(ex)
@@ -617,63 +621,57 @@ class PySideDynamicPlanDialog(QDialog):
             ps.exercises[idx], ps.exercises[idx + 1] = ps.exercises[idx + 1], ps.exercises[idx]
             self._render_plan()
 
-    def _add_exercise(self, ps: PlannedSession):
+    def _add_ex(self, ps: PlannedSession):
         ps.exercises.append(PlannedExercise(var_name="exercise", sets=3, reps="5", mass="0", comment=""))
         self._render_plan()
 
-    def _remove_exercise(self, ps: PlannedSession, ex: PlannedExercise):
+    def _remove_ex(self, ps: PlannedSession, ex: PlannedExercise):
         if ex in ps.exercises:
             ps.exercises.remove(ex)
             self._render_plan()
 
     def _add_day(self):
-        new_day_num = len(self.planned) + 1
-        self.planned.append(PlannedSession(day_num=new_day_num, date_str="", exercises=[]))
+        new_num = len(self.planned) + 1
+        self.planned.append(PlannedSession(day_num=new_num, date_str="", exercises=[]))
         self._render_plan()
 
     def _remove_day(self, idx: int):
         if 0 <= idx < len(self.planned):
             self.planned.pop(idx)
-            # Re-index days
             for i, ps in enumerate(self.planned, 1):
                 ps.day_num = i
             self._render_plan()
 
-    def _apply_deload(self):
+    def _prompt_deload(self):
         val, ok = QInputDialog.getDouble(self, "Deload Plan", "Enter deload percentage (e.g. 10 for 10%):", 10.0, 1.0, 50.0, 1)
         if ok:
             pct = val / 100.0
             for ps in self.planned:
                 for ex in ps.exercises:
                     try:
-                        m_val = float(ex.mass)
-                        new_m = round(m_val * (1.0 - pct) * 2) / 2
-                        ex.mass = str(new_m)
+                        m = float(ex.mass)
+                        ex.mass = str(round(m * (1.0 - pct) * 2) / 2)
                         ex.comment = f"Deload -{val:.0f}%"
                     except ValueError:
                         pass
             self._render_plan()
 
-    def _restore_pre_deload(self):
-        QMessageBox.information(self, "Restore", "Restoring full weights from pre-deload cycle baseline.")
-        self._render_plan()
-
     def _save_plan(self):
-        # Validate novel exercises
-        new_exs = get_genuinely_new_exercises(self.sessions_file_path, self.planned)
+        new_exs = get_genuinely_new_exercises(self.file_path, self.planned)
         if new_exs:
             ex_list = "\n".join(f"  • {e}" for e in new_exs)
             ret = QMessageBox.question(
                 self,
                 "Confirm New Exercises",
-                f"The following new exercises were not found in sessions.py and will be automatically registered:\n\n{ex_list}\n\nDo you want to proceed and save?",
+                f"The following new exercises were not found in sessions.py and will be automatically registered:\n\n{ex_list}\n\nDo you want to proceed?",
                 QMessageBox.Yes | QMessageBox.No,
             )
             if ret != QMessageBox.Yes:
                 return
 
         try:
-            write_planned_sessions(self.sessions_file_path, self.planned)
+            write_planned_sessions(self.file_path, self.planned)
+            self.confirmed = True
             QMessageBox.information(self, "Success", "Planned cycle successfully written to sessions.py!")
             self.accept()
         except Exception as e:
@@ -681,18 +679,19 @@ class PySideDynamicPlanDialog(QDialog):
 
 
 class IronLogPySideApp(QMainWindow):
-    """Main PySide6 Application Window for Iron Log."""
+    """Main PySide6 Window with exact CustomTkinter layout and color theme."""
 
     def __init__(self):
         super().__init__()
         self.setWindowTitle(f"Iron Log {__version__} (PySide6 Edition)")
         self.resize(1100, 720)
         self.setMinimumSize(960, 580)
-        self.setStyleSheet(PYSIDE_DARK_QSS)
+        self.setStyleSheet(CTK_MATCHING_QSS)
 
         self.manager = ProfileManager()
-        self.thread_pool = QThreadPool()
         self.active_sessions = None
+        self.cached_stats = {}
+        self.last_generated_at = None
 
         self._build_ui()
         self._load_active_profile()
@@ -700,182 +699,180 @@ class IronLogPySideApp(QMainWindow):
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        main_layout.setContentsMargins(15, 12, 15, 12)
-        main_layout.setSpacing(12)
+        main_layout = QHBoxLayout(central)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
 
-        # 1. Header & Profile Selector Row
-        top_frame = QFrame()
-        top_frame.setObjectName("CardFrame")
-        top_layout = QHBoxLayout(top_frame)
-        top_layout.setContentsMargins(12, 8, 12, 8)
+        # ── 1. LEFT SIDEBAR (Width 210px, Color #161616) ──────────────────────
+        sidebar = QFrame()
+        sidebar.setObjectName("Sidebar")
+        sidebar.setFixedWidth(210)
+        s_layout = QVBoxLayout(sidebar)
+        s_layout.setContentsMargins(16, 20, 16, 16)
+        s_layout.setSpacing(4)
 
-        # App Brand
-        brand_lbl = QLabel("⚡ IRON LOG")
-        brand_lbl.setStyleSheet("font-size: 16px; font-weight: bold; color: #38BDF8; letter-spacing: 1px;")
-        top_layout.addWidget(brand_lbl)
+        # Profile title & subtitle
+        self.lbl_profile_name = QLabel("Default User")
+        self.lbl_profile_name.setObjectName("ProfileTitle")
+        s_layout.addWidget(self.lbl_profile_name)
 
-        top_layout.addSpacing(20)
+        lbl_sub = QLabel("Iron Log (PySide6)")
+        lbl_sub.setObjectName("AppSubtitle")
+        s_layout.addWidget(lbl_sub)
 
-        # Profile selection
-        top_layout.addWidget(QLabel("Profile:"))
-        self.profile_combo = QComboBox()
-        self.profile_combo.setMinimumWidth(160)
-        self.profile_combo.currentIndexChanged.connect(self._on_profile_changed)
-        top_layout.addWidget(self.profile_combo)
+        div1 = QFrame()
+        div1.setObjectName("Divider")
+        s_layout.addWidget(div1)
+        s_layout.addSpacing(6)
 
-        btn_add_prof = QPushButton("+ New")
-        btn_add_prof.setObjectName("SmallToolBtn")
-        btn_add_prof.clicked.connect(self._prompt_new_profile)
-        top_layout.addWidget(btn_add_prof)
+        # Primary Actions
+        btn_gen = QPushButton("🚀 Generate Excel Log")
+        btn_gen.setObjectName("PrimaryAction1")
+        btn_gen.clicked.connect(self.run_log_generator)
+        s_layout.addWidget(btn_gen)
 
-        top_layout.addStretch()
+        btn_plan = QPushButton("🗓️ Plan Next Cycle")
+        btn_plan.setObjectName("PrimaryAction2")
+        btn_plan.clicked.connect(self.run_plan_generator)
+        s_layout.addWidget(btn_plan)
 
-        # Engine Badge
-        engine_badge = QLabel("Engine: PySide6 (Qt 6 C++)")
-        engine_badge.setStyleSheet("color: #4ADE80; font-weight: 600; font-size: 11px; padding: 2px 8px; border: 1px solid #15803D; border-radius: 4px; background: #064E3B;")
-        top_layout.addWidget(engine_badge)
+        btn_open_excel = QPushButton("📂 Open Latest Log")
+        btn_open_excel.setObjectName("PrimaryAction3")
+        btn_open_excel.clicked.connect(self.open_latest_excel)
+        s_layout.addWidget(btn_open_excel)
 
-        main_layout.addWidget(top_frame)
+        s_layout.addSpacing(6)
+        div2 = QFrame()
+        div2.setObjectName("Divider")
+        s_layout.addWidget(div2)
+        s_layout.addSpacing(6)
 
-        # 2. Stats Metric Cards Row
-        stats_layout = QHBoxLayout()
-        stats_layout.setSpacing(10)
+        # Secondary Actions
+        btn_edit = QPushButton("  📝  Edit Sessions")
+        btn_edit.setObjectName("SecondaryAction")
+        btn_edit.clicked.connect(self.edit_sessions)
+        s_layout.addWidget(btn_edit)
 
-        self.card_total = self._create_stat_card("Total Sessions", "--", "All time recorded")
-        self.card_last = self._create_stat_card("Last Workout", "--", "Latest session date")
-        self.card_split = self._create_stat_card("Active Split", "--", "Click for routine details", clickable=True)
-        self.card_mass = self._create_stat_card("Current Body Mass", "--", "From bodymass log")
+        btn_out = QPushButton("  📊  Output Folder")
+        btn_out.setObjectName("SecondaryAction")
+        btn_out.clicked.connect(self.open_output)
+        s_layout.addWidget(btn_out)
 
-        stats_layout.addWidget(self.card_total)
-        stats_layout.addWidget(self.card_last)
-        stats_layout.addWidget(self.card_split)
-        stats_layout.addWidget(self.card_mass)
+        btn_std = QPushButton("  📚  Exercise Library")
+        btn_std.setObjectName("SecondaryAction")
+        btn_std.clicked.connect(self.show_exercise_library)
+        s_layout.addWidget(btn_std)
 
-        main_layout.addLayout(stats_layout)
+        btn_split = QPushButton("  🔄  Split Details")
+        btn_split.setObjectName("SecondaryAction")
+        btn_split.clicked.connect(self.show_split_details)
+        s_layout.addWidget(btn_split)
 
-        # 3. Action Toolbar Row
-        action_layout = QHBoxLayout()
-        action_layout.setSpacing(8)
+        s_layout.addStretch()
 
-        self.btn_gen_excel = QPushButton("📊 Generate Excel Log")
-        self.btn_gen_excel.setObjectName("PrimaryBtn")
-        self.btn_gen_excel.clicked.connect(self._generate_excel)
-        action_layout.addWidget(self.btn_gen_excel)
+        # Status footer
+        self.lbl_status = QLabel("Ready")
+        self.lbl_status.setStyleSheet("color: #555555; font-size: 11px;")
+        s_layout.addWidget(self.lbl_status)
 
-        btn_planner = QPushButton("📅 Cycle Planner")
-        btn_planner.clicked.connect(self._open_planner)
-        action_layout.addWidget(btn_planner)
+        self.lbl_last_gen = QLabel("")
+        self.lbl_last_gen.setStyleSheet("color: #444444; font-size: 10px;")
+        s_layout.addWidget(self.lbl_last_gen)
 
-        btn_standards = QPushButton("🏋️ Strength Standards")
-        btn_standards.clicked.connect(self._open_standards)
-        action_layout.addWidget(btn_standards)
+        main_layout.addWidget(sidebar)
 
-        btn_split = QPushButton("🔄 Split Details")
-        btn_split.clicked.connect(self._open_split_details)
-        action_layout.addWidget(btn_split)
+        # ── 2. MAIN CONTENT AREA (#121212) ────────────────────────────────────
+        content = QWidget()
+        c_layout = QVBoxLayout(content)
+        c_layout.setContentsMargins(18, 14, 18, 14)
+        c_layout.setSpacing(14)
 
-        action_layout.addStretch()
+        # Header Row
+        hdr_row = QHBoxLayout()
+        hdr_title = QLabel("Recent Sessions")
+        hdr_title.setStyleSheet("font-size: 22px; font-weight: bold; color: #FFFFFF;")
+        hdr_row.addWidget(hdr_title)
 
-        btn_edit_sess = QPushButton("Edit sessions.py")
-        btn_edit_sess.setObjectName("SmallToolBtn")
-        btn_edit_sess.clicked.connect(self._edit_sessions)
-        action_layout.addWidget(btn_edit_sess)
+        hdr_row.addStretch()
 
-        btn_open_out = QPushButton("Output Folder")
-        btn_open_out.setObjectName("SmallToolBtn")
-        btn_open_out.clicked.connect(self._open_output)
-        action_layout.addWidget(btn_open_out)
+        btn_refresh = QPushButton("↻  Refresh")
+        btn_refresh.setFixedSize(100, 30)
+        btn_refresh.setStyleSheet("background: #252525; color: white; border-radius: 6px; font-weight: bold;")
+        btn_refresh.clicked.connect(self._load_recent_sessions)
+        hdr_row.addWidget(btn_refresh)
+        c_layout.addLayout(hdr_row)
 
-        main_layout.addLayout(action_layout)
+        # 3 Stats Metric Cards Row
+        self.stats_layout = QHBoxLayout()
+        self.stats_layout.setSpacing(12)
 
-        # 4. Recent Workout Sessions Display Panel
-        panel_title = QLabel("Recent Workout Sessions (Active Cycle)")
-        panel_title.setStyleSheet("font-weight: bold; font-size: 13px; color: #A1A1AA;")
-        main_layout.addWidget(panel_title)
+        # Card 1: Gym Attendance
+        self.c1 = QFrame()
+        self.c1.setObjectName("StatCard")
+        c1_l = QVBoxLayout(self.c1)
+        c1_l.setContentsMargins(14, 12, 14, 12)
+        c1_l.addWidget(QLabel("GYM ATTENDANCE", objectName="StatCardTitle"))
+        self.c1_val = QLabel("-- Days", objectName="StatCardValue")
+        c1_l.addWidget(self.c1_val)
+        self.c1_sub = QLabel("-- this year · -- this month", objectName="StatCardSub")
+        c1_l.addWidget(self.c1_sub)
+        self.stats_layout.addWidget(self.c1)
 
+        # Card 2: Current Split Duration (Clickable)
+        self.c2 = QFrame()
+        self.c2.setObjectName("StatCard")
+        self.c2.setCursor(Qt.PointingHandCursor)
+        self.c2.mousePressEvent = lambda e: self.show_split_details()
+        c2_l = QVBoxLayout(self.c2)
+        c2_l.setContentsMargins(14, 12, 14, 12)
+        c2_l.addWidget(QLabel("CURRENT SPLIT DURATION", objectName="StatCardTitle"))
+        self.c2_val = QLabel("-- Weeks", objectName="StatCardValue")
+        c2_l.addWidget(self.c2_val)
+        self.c2_sub = QLabel("N-Day Split · started --", objectName="StatCardSub")
+        c2_l.addWidget(self.c2_sub)
+        self.stats_layout.addWidget(self.c2)
+
+        # Card 3: Last Workout
+        self.c3 = QFrame()
+        self.c3.setObjectName("StatCard")
+        c3_l = QVBoxLayout(self.c3)
+        c3_l.setContentsMargins(14, 12, 14, 12)
+        c3_l.addWidget(QLabel("LAST WORKOUT", objectName="StatCardTitle"))
+        self.c3_val = QLabel("--", objectName="StatCardValue")
+        c3_l.addWidget(self.c3_val)
+        self.c3_sub = QLabel("Day --", objectName="StatCardSub")
+        c3_l.addWidget(self.c3_sub)
+        self.stats_layout.addWidget(self.c3)
+
+        c_layout.addLayout(self.stats_layout)
+
+        # Recent Sessions Horizontal Card Row
         self.sessions_scroll = QScrollArea()
         self.sessions_scroll.setWidgetResizable(True)
         self.sessions_container = QWidget()
         self.sessions_layout = QHBoxLayout(self.sessions_container)
         self.sessions_layout.setSpacing(12)
-        self.sessions_layout.setAlignment(Qt.AlignLeft)
+        self.sessions_layout.setContentsMargins(0, 0, 0, 0)
         self.sessions_scroll.setWidget(self.sessions_container)
-        main_layout.addWidget(self.sessions_scroll, 1)
+        c_layout.addWidget(self.sessions_scroll, 1)
 
-        # 5. Status Bar & Progress
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setVisible(False)
-        self.progress_bar.setFixedHeight(14)
-        main_layout.addWidget(self.progress_bar)
-
-        self.status_bar = QStatusBar()
-        self.setStatusBar(self.status_bar)
-        self.status_bar.showMessage("Ready")
-
-    def _create_stat_card(self, title_text: str, value_text: str, sub_text: str, clickable: bool = False) -> QFrame:
-        card = QFrame()
-        card.setObjectName("StatCard")
-        if clickable:
-            card.setCursor(Qt.PointingHandCursor)
-            card.mousePressEvent = lambda e: self._open_split_details()
-
-        l = QVBoxLayout(card)
-        l.setContentsMargins(10, 8, 10, 8)
-        l.setSpacing(2)
-
-        t_lbl = QLabel(title_text)
-        t_lbl.setObjectName("CardTitle")
-        l.addWidget(t_lbl)
-
-        v_lbl = QLabel(value_text)
-        v_lbl.setObjectName("CardValue")
-        l.addWidget(v_lbl)
-
-        s_lbl = QLabel(sub_text)
-        s_lbl.setObjectName("CardSub")
-        l.addWidget(s_lbl)
-
-        card.value_label = v_lbl
-        card.sub_label = s_lbl
-        return card
+        main_layout.addWidget(content, 1)
 
     def _load_active_profile(self):
-        self.profile_combo.blockSignals(True)
-        self.profile_combo.clear()
-        for prof in self.manager.profiles:
-            self.profile_combo.addItem(prof.name)
-        if self.manager.active_profile_index >= 0:
-            self.profile_combo.setCurrentIndex(self.manager.active_profile_index)
-        self.profile_combo.blockSignals(False)
+        p = self.manager.get_active_profile()
+        if p:
+            self.lbl_profile_name.setText(p.name)
+        self._load_recent_sessions()
 
-        self._refresh_data()
-
-    def _on_profile_changed(self, index: int):
-        if index >= 0:
-            self.manager.set_active(index)
-            self._refresh_data()
-
-    def _prompt_new_profile(self):
-        name, ok = QInputDialog.getText(self, "New Profile", "Enter profile name:")
-        if ok and name.strip():
-            prof = Profile(name=name.strip(), sessions_dir="", output_dir="", sex="male")
-            self.manager.add_profile(prof)
-            self._load_active_profile()
-
-    def _refresh_data(self):
+    def _load_recent_sessions(self):
         p = self.manager.get_active_profile()
         if not p:
-            self.status_bar.showMessage("No profile selected")
+            self.lbl_status.setText("No active profile.")
             return
 
-        # Load sessions module
-        sessions_file = getattr(p, "sessions_file", None)
-        if not sessions_file:
-            sessions_file = os.path.join(p.sessions_dir, "sessions.py")
-
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
         if not os.path.exists(sessions_file):
-            self.status_bar.showMessage(f"sessions.py not found at: {sessions_file}")
+            self.lbl_status.setText(f"sessions.py not found at {sessions_file}")
             return
 
         try:
@@ -883,182 +880,200 @@ class IronLogPySideApp(QMainWindow):
             if sessions_dir not in sys.path:
                 sys.path.insert(0, sessions_dir)
 
-            import importlib
             if "sessions" in sys.modules:
                 sess = importlib.reload(sys.modules["sessions"])
             else:
                 import sessions as sess
 
             self.active_sessions = sess
-            self._update_stats_and_sessions(sess, p)
-            self.status_bar.showMessage(f"Loaded profile: {p.name} ({sessions_file})")
+            user_data = getattr(sess, "USER_DATA", {})
+            stats = calculate_gym_stats(user_data)
+            self.cached_stats = stats
+
+            # Update Stats Cards
+            self.c1_val.setText(f"{stats.get('total_days', 0)} Days")
+            self.c1_sub.setText(f"{stats.get('this_year_days', 0)} this year · {stats.get('this_month_days', 0)} this month")
+
+            self.c2_val.setText(f"{stats.get('current_split_weeks', 0.0):.1f} Weeks")
+            self.c2_sub.setText(f"{stats.get('cycle_length', 'N/A')}-Day Split · started {stats.get('current_split_start', 'N/A')}")
+
+            self.c3_val.setText(str(stats.get("latest_workout_date", "N/A")))
+            self.c3_sub.setText(f"Day {stats.get('latest_workout_day', 'N/A')}")
+
+            # Rebuild Horizontal Workout Cards
+            while self.sessions_layout.count():
+                item = self.sessions_layout.takeAt(0)
+                if item.widget():
+                    item.widget().deleteLater()
+
+            date_pat = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+            sorted_dates = sorted([d for d in user_data.keys() if date_pat.match(d)], reverse=True)
+            N, _ = detect_cycle(user_data)
+            show_dates = sorted_dates[: N if N else 3]
+
+            for d_str in reversed(show_dates):
+                day_data = user_data[d_str]
+                v = day_data.get("day")
+                is_pr = isinstance(v, str) and v.upper() == "PR"
+
+                card = QFrame()
+                card.setObjectName("WorkoutCardPR" if is_pr else "WorkoutCard")
+                card_l = QVBoxLayout(card)
+                card_l.setContentsMargins(14, 14, 14, 14)
+                card_l.setSpacing(6)
+
+                # Header
+                hdr_str = f"📅  {d_str}  ·  Day {v}" if isinstance(v, int) else f"📅  {d_str}  ·  {v}"
+                hdr_lbl = QLabel(hdr_str)
+                hdr_lbl.setObjectName("WorkoutHeaderPR" if is_pr else "WorkoutHeader")
+                card_l.addWidget(hdr_lbl)
+
+                sep = QFrame()
+                sep.setStyleSheet(f"background: {'#5A3000' if is_pr else '#2E2E2E'}; max-height: 1px; min-height: 1px;")
+                card_l.addWidget(sep)
+
+                # Exercises
+                for ex_id, log in day_data.items():
+                    if not isinstance(log, Log):
+                        continue
+                    info = EXERCISE_STANDARDS.get(ex_id, {})
+                    ex_name = info.get("name", ex_id)
+                    reps_str = "-".join(str(r) for r in log.reps) if len(set(log.reps)) > 1 else f"{len(log.reps)} × {log.reps[0]}"
+                    mass_str = f" @ {log.mass[0]}kg" if log.mass and max(log.mass) > 0 else " (BW)"
+
+                    ex_row = QHBoxLayout()
+                    lbl_n = QLabel(ex_name)
+                    lbl_n.setStyleSheet("color: #DDDDDD; font-size: 12px;")
+                    ex_row.addWidget(lbl_n)
+                    ex_row.addStretch()
+
+                    lbl_s = QLabel(f"{reps_str}{mass_str}")
+                    lbl_s.setStyleSheet("color: #888888; font-size: 11px;")
+                    ex_row.addWidget(lbl_s)
+
+                    card_l.addLayout(ex_row)
+
+                card_l.addStretch()
+                self.sessions_layout.addWidget(card, 1)
+
+            self.lbl_status.setText(f"Ready ({p.name})")
+
         except Exception as e:
-            self.status_bar.showMessage(f"Error loading sessions: {e}")
+            self.lbl_status.setText(f"Error: {e}")
 
-    def _update_stats_and_sessions(self, sess, profile: Profile):
-        user_data = getattr(sess, "USER_DATA", {})
-        stats = calculate_gym_stats(user_data)
-        self.cached_stats = stats
-
-        # Update cards
-        self.card_total.value_label.setText(str(stats.get("total_days", "--")))
-        self.card_total.sub_label.setText(f"{stats.get('this_year_days', 0)} this year")
-
-        latest_date = stats.get("latest_workout_date", "--")
-        latest_day = stats.get("latest_workout_day", "")
-        self.card_last.value_label.setText(str(latest_date))
-        self.card_last.sub_label.setText(f"Day {latest_day}" if latest_day else "")
-
-        weeks = stats.get("current_split_weeks", 0.0)
-        self.card_split.value_label.setText(f"{weeks:.1f} Wks")
-        self.card_split.sub_label.setText(f"{stats.get('cycle_length', '?')}-Day Cycle (Click)")
-
-        bm_log = getattr(sess, "BODYMASS_LOG", {})
-        if bm_log:
-            sorted_bm = sorted(bm_log.items(), key=lambda x: str(x[0]), reverse=True)
-            last_mass = sorted_bm[0][1] if sorted_bm else "--"
-            self.card_mass.value_label.setText(f"{last_mass} kg")
-        else:
-            self.card_mass.value_label.setText(f"{profile.mass} kg")
-
-        # Rebuild horizontal workout cards
-        while self.sessions_layout.count():
-            item = self.sessions_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-        date_pat = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-        sorted_dates = sorted([d for d in user_data.keys() if date_pat.match(d)], reverse=True)
-        N, _ = detect_cycle(user_data)
-        show_dates = sorted_dates[: N if N else 3]
-
-        for d_str in reversed(show_dates):
-            day_data = user_data[d_str]
-            card = QFrame()
-            card.setObjectName("SessionCard")
-            card.setMinimumWidth(220)
-            card_l = QVBoxLayout(card)
-            card_l.setContentsMargins(10, 10, 10, 10)
-            card_l.setSpacing(6)
-
-            # Card Header
-            d_hdr = QLabel(f"📅 {d_str} (Day {day_data.get('day', '?')})")
-            d_hdr.setStyleSheet("font-weight: bold; color: #38BDF8; font-size: 12px;")
-            card_l.addWidget(d_hdr)
-
-            # Exercise list
-            for ex_id, log in day_data.items():
-                if not isinstance(log, Log):
-                    continue
-                info = EXERCISE_STANDARDS.get(ex_id, {})
-                display_name = info.get("name", ex_id)
-                reps_str = ",".join(str(r) for r in log.reps)
-                mass_str = f" @ {log.mass[0]}kg" if log.mass and max(log.mass) > 0 else " (BW)"
-
-                ex_lbl = QLabel(f"• {display_name[:20]}")
-                ex_lbl.setStyleSheet("font-weight: 500; font-size: 11px;")
-                card_l.addWidget(ex_lbl)
-
-                val_lbl = QLabel(f"   [{reps_str}]{mass_str}")
-                val_lbl.setStyleSheet("color: #A1A1AA; font-size: 11px;")
-                card_l.addWidget(val_lbl)
-
-            card_l.addStretch()
-            self.sessions_layout.addWidget(card)
-
-        self.sessions_layout.addStretch()
-
-    def _generate_excel(self):
+    def run_log_generator(self):
         p = self.manager.get_active_profile()
         if not p or not self.active_sessions:
-            QMessageBox.warning(self, "Warning", "No active profile or sessions loaded.")
+            QMessageBox.warning(self, "Warning", "No active profile loaded.")
             return
 
-        self.btn_gen_excel.setEnabled(False)
-        self.progress_bar.setVisible(True)
-        self.progress_bar.setRange(0, 0)  # Indeterminate
-        self.status_bar.showMessage("Generating Excel Log...")
+        self.lbl_status.setText("Generating Excel Log...")
 
-        worker = ExcelWorker(p, self.active_sessions)
-        worker.signals.finished.connect(self._on_excel_success)
-        worker.signals.error.connect(self._on_excel_error)
-        self.thread_pool.start(worker)
+        def _task():
+            try:
+                timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+                filename = os.path.join(p.output_dir, f"Training_Log_{timestamp}.xlsx")
+                processor = TrainingLogProcessor(
+                    filename,
+                    self.active_sessions.EXERCISE_REGISTRY,
+                    self.active_sessions.USER_DATA,
+                    self.active_sessions.BODYMASS_LOG,
+                    p.to_dict(),
+                )
+                processor.validate_data()
+                processor.write_headers()
+                processor.process_data(self.active_sessions.USER_DATA)
+                processor.write_calculations()
+                processor.generate_charts()
+                processor.write_definitions()
+                processor.write_personal_records()
+                processor.write_user_profile()
+                processor.save()
 
-    def _on_excel_success(self, filename: str):
-        self.btn_gen_excel.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.status_bar.showMessage(f"✅ Created Excel log: {filename}")
+                self.last_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
+                QTimer.singleShot(0, lambda: self._on_log_success(filename))
+            except Exception as e:
+                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", str(e)))
+
+        threading.Thread(target=_task, daemon=True).start()
+
+    def _on_log_success(self, filename: str):
+        self.lbl_status.setText(f"✅ Excel log created!")
+        self.lbl_last_gen.setText(f"Last gen: {self.last_generated_at}")
         try:
             os.startfile(filename)
         except Exception:
             pass
 
-    def _on_excel_error(self, err_msg: str):
-        self.btn_gen_excel.setEnabled(True)
-        self.progress_bar.setVisible(False)
-        self.status_bar.showMessage(f"Error generating Excel: {err_msg}")
-        QMessageBox.critical(self, "Excel Generation Error", err_msg)
-
-    def _open_planner(self):
+    def run_plan_generator(self):
         p = self.manager.get_active_profile()
         if not p or not self.active_sessions:
-            QMessageBox.warning(self, "Warning", "Please select a valid profile first.")
+            QMessageBox.warning(self, "Warning", "Select a valid profile first.")
             return
 
-        sessions_file = getattr(p, "sessions_file", None)
-        if not sessions_file:
-            sessions_file = os.path.join(p.sessions_dir, "sessions.py")
-
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
         user_data = getattr(self.active_sessions, "USER_DATA", {})
-        N, last_day = detect_cycle(user_data)
+        N, last_day_int = detect_cycle(user_data)
+
         if N is None:
             QMessageBox.information(
                 self,
                 "Cycle Unknown",
-                "Could not detect your split cycle yet.\nComplete at least one full cycle before generating plans.",
+                "Could not detect your split cycle yet.\nComplete at least one full cycle before using 'Plan Next Cycle'.",
             )
             return
 
-        day_nums = days_to_generate(N, last_day)
+        day_nums = days_to_generate(N, last_day_int)
         if not day_nums:
             QMessageBox.information(
-                self,
-                "Nothing to add",
-                "All days in the current cycle are already planned.",
+                self, "Nothing to add", "All days in the current cycle are already planned."
             )
             return
 
         try:
             planned = build_planned_sessions(sessions_file, day_nums)
-            dlg = PySideDynamicPlanDialog(self, planned, sessions_file)
-            if dlg.exec():
-                self._refresh_data()
         except Exception as e:
-            QMessageBox.critical(self, "Planner Error", str(e))
+            QMessageBox.critical(self, "Plan Build Error", str(e))
+            return
 
-    def _open_standards(self):
+        why = f"Starting new cycle — all {N} days" if (last_day_int or 0) >= N else f"Completing cycle of {N}"
+        dialog = PySideDynamicPlanDialog(self, sessions_file, planned, title=f"Plan Next Cycle ({why})")
+        if dialog.exec() and dialog.confirmed:
+            self._load_recent_sessions()
+
+    def open_latest_excel(self):
+        p = self.manager.get_active_profile()
+        if p and p.output_dir and os.path.exists(p.output_dir):
+            import glob
+            files = sorted(glob.glob(os.path.join(p.output_dir, "Training_Log_*.xlsx")), reverse=True)
+            if files:
+                os.startfile(files[0])
+            else:
+                QMessageBox.information(self, "Notice", "No Excel files found.")
+
+    def edit_sessions(self):
+        p = self.manager.get_active_profile()
+        if p and p.sessions_dir:
+            f = os.path.join(p.sessions_dir, "sessions.py")
+            if os.path.exists(f):
+                os.startfile(f)
+
+    def open_output(self):
+        p = self.manager.get_active_profile()
+        if p and p.output_dir and os.path.exists(p.output_dir):
+            os.startfile(p.output_dir)
+
+    def show_exercise_library(self):
         p = self.manager.get_active_profile()
         sex = getattr(p, "sex", "male") if p else "male"
         mass = getattr(p, "mass", 80.0) if p else 80.0
         dlg = PySideStandardsDialog(self, user_sex=sex, user_mass=mass)
         dlg.exec()
 
-    def _open_split_details(self):
+    def show_split_details(self):
         if hasattr(self, "cached_stats"):
             dlg = PySideSplitDetailsDialog(self, self.cached_stats)
             dlg.exec()
-
-    def _edit_sessions(self):
-        p = self.manager.get_active_profile()
-        if p and p.sessions_dir:
-            file_path = os.path.join(p.sessions_dir, "sessions.py")
-            if os.path.exists(file_path):
-                os.startfile(file_path)
-
-    def _open_output(self):
-        p = self.manager.get_active_profile()
-        if p and p.output_dir and os.path.exists(p.output_dir):
-            os.startfile(p.output_dir)
 
 
 def run_pyside_app():

@@ -1621,9 +1621,9 @@ class IronLogApp(ctk.CTk):
                     try:
                         processor.validate_data()
                     except ValueError as ve:
-                        def _err():
+                        def _err(err_msg=str(ve)):
                             self.set_status("Generation Failed: Data Mismatch", "red", auto_reset_ms=8000)
-                            messagebox.showerror("Data Error", str(ve))
+                            messagebox.showerror("Data Error", err_msg)
                         self.after(0, _err)
                         return
 
