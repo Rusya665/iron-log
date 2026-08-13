@@ -737,11 +737,12 @@ class WebViewBridgeApi:
             why = f"Starting new cycle — all {N} days" if (last_day_int or 0) >= N else f"Completing cycle of {N}"
             serializable_plan = [
                 {
-                    "day_num": ps.day_num,
+                    "day_num": ps.day_number,
                     "date_str": ps.date_str,
                     "exercises": [
                         {
                             "var_name": ex.var_name,
+                            "display_name": getattr(ex, "display_name", ex.var_name),
                             "sets": ex.sets,
                             "reps": ex.reps,
                             "mass": ex.mass,
@@ -768,6 +769,7 @@ class WebViewBridgeApi:
                 ex_objs = [
                     PlannedExercise(
                         var_name=e.get("var_name", "exercise"),
+                        display_name=e.get("display_name", e.get("var_name", "exercise")),
                         sets=int(e.get("sets", 3)),
                         reps=str(e.get("reps", "5")),
                         mass=str(e.get("mass", "0")),
@@ -776,7 +778,7 @@ class WebViewBridgeApi:
                     for e in d.get("exercises", [])
                 ]
                 planned_objs.append(
-                    PlannedSession(day_num=int(d.get("day_num", 1)), date_str=d.get("date_str", ""), exercises=ex_objs)
+                    PlannedSession(day_number=int(d.get("day_num", 1)), date_str=d.get("date_str", ""), exercises=ex_objs)
                 )
 
             write_planned_sessions(sessions_file, planned_objs)

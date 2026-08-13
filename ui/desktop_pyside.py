@@ -469,7 +469,7 @@ class PySideDynamicPlanDialog(QDialog):
             dh_layout = QHBoxLayout(dh)
             dh_layout.setContentsMargins(10, 6, 10, 6)
 
-            day_badge = QLabel(f"Day {ps.day_num}")
+            day_badge = QLabel(f"Day {ps.day_number}")
             day_badge.setStyleSheet("background: #00695C; color: white; font-weight: bold; border-radius: 4px; padding: 4px 10px;")
             dh_layout.addWidget(day_badge)
 
@@ -622,7 +622,7 @@ class PySideDynamicPlanDialog(QDialog):
             self._render_plan()
 
     def _add_ex(self, ps: PlannedSession):
-        ps.exercises.append(PlannedExercise(var_name="exercise", sets=3, reps="5", mass="0", comment=""))
+        ps.exercises.append(PlannedExercise(var_name="exercise", display_name="Exercise", sets=3, reps="5", mass="0", comment=""))
         self._render_plan()
 
     def _remove_ex(self, ps: PlannedSession, ex: PlannedExercise):
@@ -632,14 +632,14 @@ class PySideDynamicPlanDialog(QDialog):
 
     def _add_day(self):
         new_num = len(self.planned) + 1
-        self.planned.append(PlannedSession(day_num=new_num, date_str="", exercises=[]))
+        self.planned.append(PlannedSession(day_number=new_num, date_str="", exercises=[]))
         self._render_plan()
 
     def _remove_day(self, idx: int):
         if 0 <= idx < len(self.planned):
             self.planned.pop(idx)
             for i, ps in enumerate(self.planned, 1):
-                ps.day_num = i
+                ps.day_number = i
             self._render_plan()
 
     def _prompt_deload(self):

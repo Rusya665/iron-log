@@ -336,7 +336,7 @@ class IronLogDearPyGuiApp:
             with dpg.child_window(parent="cycler_days_container", height=240, border=True):
                 # Day Header
                 with dpg.group(horizontal=True):
-                    dpg.add_button(label=f"Day {ps.day_num}", width=70, height=26)
+                    dpg.add_button(label=f"Day {ps.day_number}", width=70, height=26)
                     dpg.add_text("Date:")
                     dpg.add_input_text(default_value=ps.date_str, width=120, callback=lambda s, a, p=ps: setattr(p, "date_str", a))
                     dpg.add_spacer(width=10)
@@ -387,7 +387,7 @@ class IronLogDearPyGuiApp:
             self._draw_cycler_days()
 
     def _add_ex_to_plan(self, ps: PlannedSession):
-        ps.exercises.append(PlannedExercise(var_name="exercise", sets=3, reps="5", mass="0", comment=""))
+        ps.exercises.append(PlannedExercise(var_name="exercise", display_name="Exercise", sets=3, reps="5", mass="0", comment=""))
         self._draw_cycler_days()
 
     def _remove_ex_from_plan(self, ps: PlannedSession, ex: PlannedExercise):
@@ -397,14 +397,14 @@ class IronLogDearPyGuiApp:
 
     def _add_plan_day(self):
         new_num = len(self.planned_sessions) + 1
-        self.planned_sessions.append(PlannedSession(day_num=new_num, date_str="", exercises=[]))
+        self.planned_sessions.append(PlannedSession(day_number=new_num, date_str="", exercises=[]))
         self._draw_cycler_days()
 
     def _remove_plan_day(self, idx: int):
         if 0 <= idx < len(self.planned_sessions):
             self.planned_sessions.pop(idx)
             for i, ps in enumerate(self.planned_sessions, 1):
-                ps.day_num = i
+                ps.day_number = i
             self._draw_cycler_days()
 
     def _apply_deload(self):
