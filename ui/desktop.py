@@ -1501,6 +1501,15 @@ class IronLogApp(ctk.CTk):
                         f"Copied '{s}' to clipboard!", "green", auto_reset_ms=3000
                     )
 
+                def copy_py_cb(s=slug):
+                    var_name = s.replace("-", "_")
+                    code_str = f'{var_name} = "{s}"'
+                    self.clipboard_clear()
+                    self.clipboard_append(code_str)
+                    self.set_status(
+                        f"Copied '{code_str}' to clipboard!", "green", auto_reset_ms=3000
+                    )
+
                 def open_link(s=slug):
                     webbrowser.open(f"https://strengthlevel.com/strength-standards/{s}")
 
@@ -1511,6 +1520,15 @@ class IronLogApp(ctk.CTk):
                     height=24,
                     font=("Roboto", 10),
                     command=copy_to_cb,
+                ).pack(side="left", padx=2)
+                ctk.CTkButton(
+                    btn_frame,
+                    text="Copy Py",
+                    width=60,
+                    height=24,
+                    font=("Roboto", 10),
+                    fg_color="#27ae60",
+                    command=copy_py_cb,
                 ).pack(side="left", padx=2)
                 ctk.CTkButton(
                     btn_frame,
