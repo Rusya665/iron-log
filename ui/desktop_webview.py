@@ -1,24 +1,31 @@
 """PyWebView (Microsoft Edge WebView2) Desktop GUI for Iron Log.
 
-Ultra-sleek, modern dark-themed interface with 100% CustomTkinter feature parity:
+Ultra-modern, state-of-the-art dark glassmorphic interface:
+- Modern Typography: Google Fonts 'Outfit' (headers & metrics) + 'Inter' (data & body)
+- Glassmorphic Elevated Surfaces & Ambient Glow Accents
 - Top Desktop Menu Bar (App, Settings, Profiles, 🧪 Experimental)
-- Profile Manager & Switcher Modals
-- Interactive Strength Standards Tooltip on Hover & Full 280+ Library Browser
 - Dedicated Standalone Dynamic Plan Cycler Window
+- Real-time Strength Standards Hover Tooltip & Full 280+ Library Browser
+- Profile Manager & Switcher Modals
 - Bodymass Prefill & Fill-in Missing Masses Modals
-- sessions.py Validator
-- Scraper Integration
+- sessions.py Validator & Scraper Integration
 - Multi-threaded Excel Generation
 """
+
+import os
+import sys
+
+# Ensure project root is in sys.path when invoked directly
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
 
 import copy
 import glob
 import importlib
 import json
-import os
 import re
 import subprocess
-import sys
 import tempfile
 import threading
 import webbrowser
@@ -54,233 +61,480 @@ HTML_TEMPLATE = f"""
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iron Log</title>
+    <!-- Google Fonts: Outfit (Metrics & Headers) + Inter (Interface & Data) + JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    
     <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-        body {{ background-color: #121212; color: #FFFFFF; height: 100vh; display: flex; flex-direction: column; overflow: hidden; user-select: none; }}
-        
-        /* Custom Modern Scrollbars */
-        ::-webkit-scrollbar {{ width: 8px; height: 8px; }}
-        ::-webkit-scrollbar-track {{ background: #121212; }}
-        ::-webkit-scrollbar-thumb {{ background: #2E2E2E; border-radius: 4px; }}
-        ::-webkit-scrollbar-thumb:hover {{ background: #444444; }}
+        :root {{
+            --bg-app: #0A0D14;
+            --bg-sidebar: rgba(13, 17, 26, 0.95);
+            --bg-card: rgba(18, 24, 38, 0.72);
+            --bg-card-hover: rgba(24, 32, 50, 0.85);
+            --bg-glass-modal: rgba(15, 20, 32, 0.92);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --border-glass-hover: rgba(99, 102, 241, 0.4);
+            
+            --text-primary: #FFFFFF;
+            --text-secondary: #94A3B8;
+            --text-muted: #64748B;
+            
+            --accent-blue-start: #2563EB;
+            --accent-blue-end: #06B6D4;
+            --accent-purple-start: #7C3AED;
+            --accent-purple-end: #C026D3;
+            --accent-emerald-start: #059669;
+            --accent-emerald-end: #10B981;
+            --accent-amber-start: #D97706;
+            --accent-amber-end: #F59E0B;
+            
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --radius-xl: 18px;
+        }}
+
+        * {{
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }}
+
+        body {{
+            background-color: var(--bg-app);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(37, 99, 235, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(124, 58, 237, 0.08) 0%, transparent 40%);
+        }}
+
+        /* Modern Custom Scrollbar */
+        ::-webkit-scrollbar {{ width: 7px; height: 7px; }}
+        ::-webkit-scrollbar-track {{ background: transparent; }}
+        ::-webkit-scrollbar-thumb {{ background: rgba(255, 255, 255, 0.14); border-radius: 4px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: rgba(255, 255, 255, 0.28); }}
 
         /* ── 0. TOP DESKTOP MENU BAR ────────────────────────────────────── */
         .top-menubar {{
-            height: 30px;
-            background-color: #161616;
-            border-bottom: 1px solid #262626;
+            height: 32px;
+            background-color: rgba(10, 13, 20, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-glass);
             display: flex;
             align-items: center;
-            padding: 0 8px;
+            padding: 0 12px;
             font-size: 12px;
-            color: #CCCCCC;
+            color: var(--text-secondary);
             position: relative;
             z-index: 500;
             flex-shrink: 0;
         }}
+        .brand-badge {{
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 12px;
+            letter-spacing: 1px;
+            background: linear-gradient(135deg, #60A5FA, #A78BFA);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-right: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
         .menu-btn {{
             padding: 4px 10px;
             cursor: pointer;
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             position: relative;
-            transition: background 0.12s ease, color 0.12s ease;
+            transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+            font-weight: 500;
         }}
         .menu-btn:hover, .menu-btn.active {{
-            background-color: #262626;
+            background-color: rgba(255, 255, 255, 0.08);
             color: #FFFFFF;
         }}
-        
-        /* Dropdown Popover */
+
         .menu-dropdown {{
             position: absolute;
-            top: 28px;
+            top: 30px;
             left: 0;
-            background-color: #1E1E1E;
-            border: 1px solid #333333;
-            border-radius: 6px;
-            min-width: 220px;
-            padding: 4px 0;
-            box-shadow: 0 8px 24px rgba(0,0,0,0.7);
+            background: rgba(18, 24, 38, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: var(--radius-md);
+            min-width: 230px;
+            padding: 5px;
+            box-shadow: 0 16px 36px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.05);
             display: none;
             flex-direction: column;
             z-index: 1000;
+            animation: menuFade 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+        }}
+        @keyframes menuFade {{
+            from {{ opacity: 0; transform: translateY(-4px) scale(0.98); }}
+            to {{ opacity: 1; transform: translateY(0) scale(1); }}
         }}
         .menu-dropdown.show {{ display: flex; }}
         .menu-item {{
-            padding: 7px 14px;
+            padding: 7px 12px;
             display: flex;
             align-items: center;
             justify-content: space-between;
             cursor: pointer;
             font-size: 12px;
-            color: #DDDDDD;
-            transition: background 0.1s ease;
+            color: #E2E8F0;
+            border-radius: var(--radius-sm);
+            transition: all 0.12s ease;
         }}
-        .menu-item:hover {{ background-color: #1565C0; color: #FFFFFF; }}
-        .menu-item.disabled {{ color: #666666; cursor: default; }}
-        .menu-item.disabled:hover {{ background-color: transparent; }}
-        .menu-sep {{ height: 1px; background-color: #2E2E2E; margin: 4px 0; }}
-        
-        /* App layout container below menubar */
+        .menu-item:hover {{
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.85), rgba(37, 99, 235, 0.85));
+            color: #FFFFFF;
+            transform: translateX(2px);
+        }}
+        .menu-sep {{ height: 1px; background: rgba(255, 255, 255, 0.07); margin: 4px 2px; }}
+
+        /* ── APP BODY ────────────────────────────────────────────────────── */
         .app-body {{
             flex: 1;
             display: flex;
-            height: calc(100vh - 30px);
+            height: calc(100vh - 32px);
             overflow: hidden;
         }}
 
-        /* ── 1. LEFT SIDEBAR (210px, #161616) ────────────────────────────── */
+        /* ── 1. LEFT SIDEBAR ─────────────────────────────────────────────── */
         aside {{
-            width: 210px;
-            background-color: #161616;
-            border-right: 1px solid #222222;
-            padding: 18px 14px;
+            width: 224px;
+            background: var(--bg-sidebar);
+            backdrop-filter: blur(16px);
+            border-right: 1px solid var(--border-glass);
+            padding: 20px 16px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 8px;
             flex-shrink: 0;
+            box-shadow: 4px 0 24px rgba(0,0,0,0.25);
         }}
-        .prof-name {{ font-size: 17px; font-weight: bold; color: #FFFFFF; }}
-        .prof-sub {{ font-size: 11px; color: #555555; margin-bottom: 4px; }}
-        .divider {{ height: 1px; background-color: #2E2E2E; margin: 6px 0; }}
         
+        .profile-card {{
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8));
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-lg);
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }}
+        .profile-card:hover {{
+            border-color: rgba(99, 102, 241, 0.4);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+        }}
+        .profile-avatar {{
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 15px;
+            color: #FFFFFF;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }}
+        .profile-info {{ display: flex; flex-direction: column; }}
+        .prof-name {{ font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 700; color: #FFFFFF; letter-spacing: 0.2px; }}
+        .prof-badge {{ font-size: 10px; color: #4ADE80; display: flex; align-items: center; gap: 4px; font-weight: 600; margin-top: 1px; }}
+        .prof-dot {{ width: 6px; height: 6px; border-radius: 50%; background-color: #4ADE80; box-shadow: 0 0 6px #4ADE80; }}
+
+        .divider {{ height: 1px; background: rgba(255, 255, 255, 0.06); margin: 6px 0; }}
+
         /* Primary Action Buttons */
         .btn-side-primary1 {{
-            background: linear-gradient(135deg, #1565C0, #1976D2);
-            color: #FFFFFF; font-size: 13px; font-weight: bold;
-            border-radius: 8px; padding: 11px 12px; border: none; cursor: pointer; text-align: center;
-            box-shadow: 0 2px 6px rgba(21, 101, 192, 0.3); transition: all 0.15s ease;
+            background: linear-gradient(135deg, var(--accent-blue-start), var(--accent-blue-end));
+            color: #FFFFFF; font-size: 13px; font-weight: 700;
+            border-radius: var(--radius-md); padding: 12px 14px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
         }}
-        .btn-side-primary1:hover {{ filter: brightness(1.15); transform: translateY(-1px); }}
+        .btn-side-primary1:hover {{ filter: brightness(1.15); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5); }}
 
         .btn-side-primary2 {{
-            background: linear-gradient(135deg, #6A1B9A, #7B1FA2);
-            color: #FFFFFF; font-size: 13px; font-weight: bold;
-            border-radius: 8px; padding: 11px 12px; border: none; cursor: pointer; text-align: center;
-            box-shadow: 0 2px 6px rgba(106, 27, 154, 0.3); transition: all 0.15s ease;
+            background: linear-gradient(135deg, var(--accent-purple-start), var(--accent-purple-end));
+            color: #FFFFFF; font-size: 13px; font-weight: 700;
+            border-radius: var(--radius-md); padding: 12px 14px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
         }}
-        .btn-side-primary2:hover {{ filter: brightness(1.15); transform: translateY(-1px); }}
+        .btn-side-primary2:hover {{ filter: brightness(1.15); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5); }}
 
         .btn-side-primary3 {{
-            background: linear-gradient(135deg, #1B5E20, #2E7D32);
-            color: #FFFFFF; font-size: 13px; font-weight: bold;
-            border-radius: 8px; padding: 11px 12px; border: none; cursor: pointer; text-align: center;
-            box-shadow: 0 2px 6px rgba(27, 94, 32, 0.3); transition: all 0.15s ease;
+            background: linear-gradient(135deg, var(--accent-emerald-start), var(--accent-emerald-end));
+            color: #FFFFFF; font-size: 13px; font-weight: 700;
+            border-radius: var(--radius-md); padding: 12px 14px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
         }}
-        .btn-side-primary3:hover {{ filter: brightness(1.15); transform: translateY(-1px); }}
+        .btn-side-primary3:hover {{ filter: brightness(1.15); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(5, 150, 105, 0.5); }}
 
         .btn-side-sec {{
-            background-color: #252525; color: #BBBBBB; font-size: 12px; font-weight: 500;
-            border-radius: 7px; padding: 9px 12px; border: 1px solid transparent; cursor: pointer; text-align: left;
-            transition: all 0.15s ease; display: flex; align-items: center; gap: 8px;
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary);
+            font-size: 12px; font-weight: 600;
+            border-radius: var(--radius-md); padding: 9px 12px; border: 1px solid rgba(255, 255, 255, 0.04);
+            cursor: pointer; text-align: left; transition: all 0.15s ease;
+            display: flex; align-items: center; gap: 9px;
         }}
-        .btn-side-sec:hover {{ background-color: #333333; color: #FFFFFF; border-color: #444; }}
-        
-        .side-status {{ margin-top: auto; font-size: 11px; color: #555555; word-break: break-word; }}
-        .side-last-gen {{ font-size: 10px; color: #444444; margin-top: 2px; }}
+        .btn-side-sec:hover {{
+            background: rgba(255, 255, 255, 0.08);
+            color: #FFFFFF;
+            border-color: rgba(255, 255, 255, 0.1);
+            transform: translateX(2px);
+        }}
 
-        /* ── 2. MAIN CONTENT AREA ────────────────────────────────────────── */
-        main {{
-            flex: 1;
-            padding: 16px 20px;
+        .side-status-box {{
+            margin-top: auto;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: var(--radius-md);
+            padding: 10px;
             display: flex;
             flex-direction: column;
-            gap: 14px;
-            overflow-y: auto;
-            background-color: #121212;
+            gap: 2px;
         }}
-        
+        .side-status {{ font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; font-weight: 500; }}
+        .side-last-gen {{ font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }}
+
+        /* ── 2. MAIN DASHBOARD ───────────────────────────────────────────── */
+        main {{
+            flex: 1;
+            padding: 22px 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            overflow-y: auto;
+            background-color: transparent;
+        }}
+
         .main-header {{
             display: flex;
             align-items: center;
             justify-content: space-between;
         }}
-        .main-title {{ font-size: 22px; font-weight: 800; color: #FFFFFF; letter-spacing: 0.3px; }}
-        .btn-refresh {{
-            background-color: #252525; color: #FFFFFF; font-size: 12px; font-weight: bold;
-            border-radius: 6px; padding: 7px 16px; border: 1px solid #333; cursor: pointer;
-            transition: all 0.15s;
+        .header-left {{ display: flex; flex-direction: column; gap: 2px; }}
+        .main-title {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 26px;
+            font-weight: 800;
+            color: #FFFFFF;
+            letter-spacing: -0.5px;
         }}
-        .btn-refresh:hover {{ background-color: #333333; border-color: #555; }}
+        .main-sub {{ font-size: 12px; color: var(--text-muted); }}
 
-        /* Stats Cards Row */
+        .btn-refresh {{
+            background: rgba(255, 255, 255, 0.06);
+            color: #FFFFFF;
+            font-size: 12px; font-weight: 600;
+            border-radius: var(--radius-md); padding: 8px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1); cursor: pointer;
+            transition: all 0.2s ease; display: flex; align-items: center; gap: 6px;
+            backdrop-filter: blur(10px);
+        }}
+        .btn-refresh:hover {{
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }}
+
+        /* 3 Stats Metric Cards Row */
         .stats-row {{
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 12px;
+            gap: 14px;
         }}
         .stat-card {{
-            background-color: #1C1C1E;
-            border: 1px solid #2E2E2E;
-            border-radius: 10px;
-            padding: 14px 16px;
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
             display: flex;
             flex-direction: column;
-            gap: 2px;
-            transition: all 0.15s ease;
+            gap: 4px;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
         }}
-        .stat-card.clickable {{ cursor: pointer; }}
-        .stat-card.clickable:hover {{ background-color: #242428; border-color: #3B82F6; transform: translateY(-1px); }}
-        .stat-t {{ font-size: 10px; font-weight: 800; color: #777777; text-transform: uppercase; letter-spacing: 0.5px; }}
-        .stat-v {{ font-size: 24px; font-weight: 800; color: #FFFFFF; margin: 2px 0; }}
-        .stat-s {{ font-size: 11px; color: #555555; }}
+        .stat-card::before {{
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5), transparent);
+            opacity: 0; transition: opacity 0.2s;
+        }}
+        .stat-card:hover {{
+            background: var(--bg-card-hover);
+            border-color: var(--border-glass-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }}
+        .stat-card:hover::before {{ opacity: 1; }}
 
-        /* Workout Cards Grid */
+        .stat-card.clickable {{ cursor: pointer; }}
+        .stat-card.clickable:hover {{
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15);
+        }}
+
+        .stat-header {{ display: flex; align-items: center; justify-content: space-between; }}
+        .stat-t {{
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }}
+        .stat-icon-badge {{
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+        }}
+        .stat-v {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 28px;
+            font-weight: 800;
+            color: #FFFFFF;
+            letter-spacing: -0.5px;
+            margin: 2px 0;
+        }}
+        .stat-s {{ font-size: 11px; color: var(--text-secondary); }}
+
+        /* Workout Cards Horizontal Row */
         .sessions-row {{
             display: flex;
-            gap: 12px;
+            gap: 14px;
             overflow-x: auto;
             flex: 1;
-            padding-bottom: 6px;
+            padding-bottom: 8px;
         }}
         .workout-card {{
-            background-color: #1C1C1E;
-            border: 1px solid #2E2E2E;
-            border-radius: 10px;
-            min-width: 260px;
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-lg);
+            min-width: 275px;
             flex: 1;
-            padding: 14px;
+            padding: 16px;
             display: flex;
             flex-direction: column;
-            gap: 6px;
+            gap: 8px;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }}
+        .workout-card:hover {{
+            background: var(--bg-card-hover);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
         }}
         .workout-card.pr-card {{
-            background-color: #2A1A00;
-            border-color: #5A3000;
+            background: linear-gradient(180deg, rgba(55, 35, 10, 0.75), rgba(28, 18, 5, 0.85));
+            border-color: rgba(245, 158, 11, 0.4);
+            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.1);
         }}
-        .workout-card-hdr {{ font-size: 13px; font-weight: bold; color: #FFFFFF; }}
-        .workout-card.pr-card .workout-card-hdr {{ color: #B45309; }}
-        .card-sep {{ height: 1px; background-color: #2E2E2E; margin: 4px 0 6px 0; }}
-        .workout-card.pr-card .card-sep {{ background-color: #5A3000; }}
-        
+        .workout-card.pr-card:hover {{
+            border-color: rgba(245, 158, 11, 0.7);
+            box-shadow: 0 8px 28px rgba(245, 158, 11, 0.2);
+        }}
+
+        .workout-card-hdr {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }}
+        .hdr-date {{ font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 700; color: #FFFFFF; }}
+        .hdr-pill {{
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #93C5FD;
+            font-size: 10px; font-weight: 700;
+            border-radius: 4px; padding: 2px 7px; text-transform: uppercase;
+        }}
+        .workout-card.pr-card .hdr-pill {{
+            background: rgba(245, 158, 11, 0.2);
+            border-color: rgba(245, 158, 11, 0.4);
+            color: #FCD34D;
+        }}
+
+        .card-sep {{ height: 1px; background: rgba(255, 255, 255, 0.06); margin: 2px 0 4px 0; }}
+        .workout-card.pr-card .card-sep {{ background: rgba(245, 158, 11, 0.2); }}
+
+        .ex-list {{ display: flex; flex-direction: column; gap: 4px; }}
         .ex-item {{
             display: flex;
             justify-content: space-between;
+            align-items: center;
             font-size: 12px;
-            padding: 3px 0;
-            position: relative;
+            padding: 5px 8px;
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.02);
+            transition: all 0.12s ease;
+        }}
+        .ex-item:hover {{
+            background: rgba(255, 255, 255, 0.06);
         }}
         .ex-name {{
-            color: #DDDDDD;
-            font-weight: 500;
+            color: #E2E8F0;
+            font-weight: 600;
             cursor: pointer;
-            transition: color 0.1s;
+            transition: color 0.12s;
         }}
-        .ex-name:hover {{ color: #60A5FA; text-decoration: underline; }}
-        .ex-meta {{ color: #888888; font-size: 11px; }}
+        .ex-name:hover {{ color: #60A5FA; }}
+        .ex-meta {{
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }}
 
         /* ── 3. HOVER STANDARDS TOOLTIP ──────────────────────────────────── */
         #standardsTooltip {{
             position: fixed;
-            background-color: #1C1C1E;
-            border: 1px solid #3E3E44;
-            border-radius: 8px;
-            padding: 10px 12px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.85);
+            background: rgba(18, 24, 38, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: var(--radius-md);
+            padding: 12px 14px;
+            box-shadow: 0 16px 36px rgba(0,0,0,0.85);
             z-index: 2000;
             display: none;
             pointer-events: none;
-            max-width: 380px;
+            max-width: 400px;
+            animation: tipFade 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+        }}
+        @keyframes tipFade {{
+            from {{ opacity: 0; transform: scale(0.97); }}
+            to {{ opacity: 1; transform: scale(1); }}
         }}
         #standardsTooltip table {{
             border-collapse: collapse;
@@ -288,77 +542,96 @@ HTML_TEMPLATE = f"""
             width: 100%;
         }}
         #standardsTooltip th {{
-            background-color: #252525;
+            background: rgba(255, 255, 255, 0.08);
             color: #FFFFFF;
-            padding: 4px 6px;
-            font-weight: bold;
+            padding: 5px 7px;
+            font-weight: 700;
             text-align: center;
         }}
         #standardsTooltip td {{
-            padding: 3px 6px;
+            padding: 4px 7px;
             text-align: center;
-            color: #CCCCCC;
-            border-bottom: 1px solid #282828;
+            color: #CBD5E1;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-family: 'JetBrains Mono', monospace;
         }}
         #standardsTooltip tr.user-mass-row {{
-            background-color: #1E3A5F;
-            font-weight: bold;
+            background: rgba(37, 99, 235, 0.25);
+            font-weight: 700;
         }}
         #standardsTooltip tr.user-mass-row td {{
-            color: #90CAF9;
+            color: #93C5FD;
         }}
         #standardsTooltip .achieved {{
             color: #4ADE80 !important;
-            font-weight: bold;
+            font-weight: 800;
         }}
 
-        /* ── 4. MODAL WINDOWS & DIALOGS ──────────────────────────────────── */
+        /* ── 4. MODALS & DIALOGS ─────────────────────────────────────────── */
         .modal-overlay {{
-            position: fixed; inset: 0; background: rgba(0, 0, 0, 0.75);
-            backdrop-filter: blur(8px);
+            position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78);
+            backdrop-filter: blur(12px);
             display: none; align-items: center; justify-content: center; z-index: 1000;
             opacity: 0; transition: opacity 0.2s ease;
         }}
         .modal-overlay.active {{ display: flex; opacity: 1; }}
         .modal-window {{
-            background-color: #161618; border: 1px solid #2E2E32; border-radius: 12px;
-            width: 980px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
-            box-shadow: 0 16px 40px rgba(0,0,0,0.85);
-            animation: modalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            background: var(--bg-glass-modal);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: var(--radius-xl);
+            width: 900px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.85);
+            animation: modalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
         }}
         @keyframes modalPop {{
-            0% {{ transform: scale(0.96) translateY(8px); opacity: 0; }}
+            0% {{ transform: scale(0.96) translateY(10px); opacity: 0; }}
             100% {{ transform: scale(1) translateY(0); opacity: 1; }}
         }}
 
-        .modal-hdr {{ background: #1E1E22; padding: 14px 20px; border-bottom: 1px solid #2A2A2E; }}
-        .modal-title {{ font-size: 16px; font-weight: 800; color: #FFFFFF; }}
-        .modal-sub {{ font-size: 12px; color: #888888; margin-top: 2px; }}
-        .modal-body {{ flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 14px; }}
+        .modal-hdr {{
+            background: rgba(255, 255, 255, 0.03);
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        }}
+        .modal-title {{ font-family: 'Outfit', sans-serif; font-size: 18px; font-weight: 800; color: #FFFFFF; }}
+        .modal-sub {{ font-size: 12px; color: var(--text-secondary); margin-top: 3px; }}
+        .modal-body {{
+            flex: 1; overflow-y: auto; padding: 20px 24px;
+            display: flex; flex-direction: column; gap: 14px;
+        }}
         .modal-footer {{
-            background: #141416; padding: 12px 20px; border-top: 1px solid #222226;
+            background: rgba(10, 14, 23, 0.75);
+            padding: 14px 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
             display: flex; gap: 12px; align-items: center;
         }}
 
-        /* Form Inputs */
         .plan-input {{
-            background-color: #222226; color: #FFFFFF; border: 1px solid #33333A;
-            border-radius: 6px; padding: 7px 10px; font-size: 12px; font-weight: 500; outline: none;
-            transition: all 0.15s;
+            background: rgba(255, 255, 255, 0.05);
+            color: #FFFFFF; border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: var(--radius-sm); padding: 8px 12px; font-size: 12px; font-weight: 500; outline: none;
+            transition: all 0.15s ease;
         }}
-        .plan-input:focus {{ border-color: #3B82F6; background-color: #26262C; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }}
-        .plan-input.center {{ text-align: center; }}
+        .plan-input:focus {{
+            border-color: #3B82F6; background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }}
 
-        /* Tables for Standards & Split */
+        /* Standards & Tables */
         table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
-        th {{ color: #777777; font-weight: bold; text-align: left; padding: 8px; border-bottom: 1px solid #2A2A2E; }}
-        td {{ padding: 8px; border-bottom: 1px solid #1E1E22; }}
-        tr:hover {{ background-color: #1A1A20; }}
+        th {{
+            color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 11px;
+            letter-spacing: 0.5px; padding: 10px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: left;
+        }}
+        td {{ padding: 9px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); color: #CBD5E1; }}
+        tr:hover {{ background: rgba(255, 255, 255, 0.03); }}
         
-        .badge-slug {{ color: #38BDF8; font-family: monospace; font-size: 12px; }}
+        .badge-slug {{ color: #38BDF8; font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
         .btn-tool {{
-            background: #25252A; color: white; border: 1px solid #33333C;
+            background: rgba(255, 255, 255, 0.06); color: #FFFFFF; border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+            transition: all 0.15s;
         }}
         .btn-tool:hover {{ background: #3B82F6; border-color: #3B82F6; }}
     </style>
@@ -366,6 +639,8 @@ HTML_TEMPLATE = f"""
 <body onclick="closeAllMenus(event)">
     <!-- ── 0. TOP DESKTOP MENU BAR ─────────────────────────────────────── -->
     <nav class="top-menubar">
+        <div class="brand-badge">⚡ IRON LOG</div>
+        
         <div class="menu-btn" id="mBtnApp" onclick="toggleMenu('menuApp', event)">
             App
             <div class="menu-dropdown" id="menuApp">
@@ -415,48 +690,86 @@ HTML_TEMPLATE = f"""
     <div class="app-body">
         <!-- ── 1. LEFT SIDEBAR ─────────────────────────────────────────── -->
         <aside>
-            <div class="prof-name" id="sidebarProfName">User</div>
-            <div class="prof-sub">Iron Log</div>
-            <div class="divider"></div>
+            <!-- Athlete Profile Pill -->
+            <div class="profile-card" onclick="openProfilePicker()" title="Click to manage or switch athlete profiles">
+                <div class="profile-avatar" id="avatarLetter">R</div>
+                <div class="profile-info">
+                    <div class="prof-name" id="sidebarProfName">Rustem</div>
+                    <div class="prof-badge"><span class="prof-dot"></span> Active Athlete</div>
+                </div>
+            </div>
 
             <!-- Primary Action Buttons -->
-            <button class="btn-side-primary1" onclick="generateExcel()">🚀  Generate Excel Log</button>
-            <button class="btn-side-primary2" onclick="openPlanCycler()">🗓️  Plan Next Cycle</button>
-            <button class="btn-side-primary3" onclick="pywebview.api.open_latest_excel()">📂  Open Latest Log</button>
+            <button class="btn-side-primary1" onclick="generateExcel()">
+                <span>🚀</span> Generate Excel Log
+            </button>
+            <button class="btn-side-primary2" onclick="openPlanCycler()">
+                <span>🗓️</span> Plan Next Cycle
+            </button>
+            <button class="btn-side-primary3" onclick="pywebview.api.open_latest_excel()">
+                <span>📂</span> Open Latest Log
+            </button>
 
             <div class="divider"></div>
 
             <!-- Secondary Action Buttons -->
-            <button class="btn-side-sec" onclick="pywebview.api.edit_sessions()">📝  Edit Sessions</button>
-            <button class="btn-side-sec" onclick="pywebview.api.open_output()">📊  Output Folder</button>
-            <button class="btn-side-sec" onclick="openStandardsModal()">📚  Exercise Library</button>
-            <button class="btn-side-sec" onclick="runScraper()">⚡  Run Scraper</button>
+            <button class="btn-side-sec" onclick="pywebview.api.edit_sessions()">
+                <span>📝</span> Edit Sessions
+            </button>
+            <button class="btn-side-sec" onclick="pywebview.api.open_output()">
+                <span>📊</span> Output Folder
+            </button>
+            <button class="btn-side-sec" onclick="openStandardsModal()">
+                <span>📚</span> Exercise Library
+            </button>
+            <button class="btn-side-sec" onclick="runScraper()">
+                <span>⚡</span> Run Scraper
+            </button>
 
-            <div class="side-status" id="sidebarStatus">Ready</div>
-            <div class="side-last-gen" id="sidebarLastGen"></div>
+            <!-- Bottom Status Indicator -->
+            <div class="side-status-box">
+                <div class="side-status" id="sidebarStatus">● System Ready</div>
+                <div class="side-last-gen" id="sidebarLastGen"></div>
+            </div>
         </aside>
 
         <!-- ── 2. MAIN CONTENT AREA ────────────────────────────────────── -->
         <main>
             <div class="main-header">
-                <div class="main-title">Recent Sessions</div>
-                <button class="btn-refresh" onclick="loadDashboard()">↻  Refresh</button>
+                <div class="header-left">
+                    <div class="main-title">Recent Sessions</div>
+                    <div class="main-sub">Training progression overview & strength trajectory</div>
+                </div>
+                <button class="btn-refresh" onclick="loadDashboard()">
+                    <span>↻</span> Refresh
+                </button>
             </div>
 
             <!-- 3 Stats Metric Cards -->
             <div class="stats-row">
                 <div class="stat-card">
-                    <div class="stat-t">GYM ATTENDANCE</div>
+                    <div class="stat-header">
+                        <div class="stat-t">Gym Attendance</div>
+                        <div class="stat-icon-badge" style="background: rgba(37, 99, 235, 0.2); color: #60A5FA;">🔥</div>
+                    </div>
                     <div class="stat-v" id="c1Val">-- Days</div>
                     <div class="stat-s" id="c1Sub">-- this year · -- this month</div>
                 </div>
+
                 <div class="stat-card clickable" onclick="openSplitModal()" title="Click to view full training split routine & history">
-                    <div class="stat-t">CURRENT SPLIT DURATION</div>
+                    <div class="stat-header">
+                        <div class="stat-t">Current Split Duration</div>
+                        <div class="stat-icon-badge" style="background: rgba(124, 58, 237, 0.2); color: #C084FC;">⚡</div>
+                    </div>
                     <div class="stat-v" id="c2Val">-- Weeks</div>
                     <div class="stat-s" id="c2Sub">N-Day Split · started --</div>
                 </div>
+
                 <div class="stat-card">
-                    <div class="stat-t">LAST WORKOUT</div>
+                    <div class="stat-header">
+                        <div class="stat-t">Last Workout</div>
+                        <div class="stat-icon-badge" style="background: rgba(245, 158, 11, 0.2); color: #FBBF24;">🏆</div>
+                    </div>
                     <div class="stat-v" id="c3Val">--</div>
                     <div class="stat-s" id="c3Sub">Day --</div>
                 </div>
@@ -464,7 +777,7 @@ HTML_TEMPLATE = f"""
 
             <!-- Recent Sessions Horizontal Cards -->
             <div class="sessions-row" id="sessionsGrid">
-                <div style="color: #777777;">Loading workout sessions...</div>
+                <div style="color: var(--text-muted); font-size: 13px;">Loading workout sessions...</div>
             </div>
         </main>
     </div>
@@ -476,12 +789,13 @@ HTML_TEMPLATE = f"""
     <div id="modalStandards" class="modal-overlay">
         <div class="modal-window" style="width: 880px;">
             <div class="modal-hdr">
-                <div class="modal-title">Strength Standards Library (All Exercises)</div>
-                <div style="margin-top: 10px; display: flex; gap: 8px;">
-                    <input type="text" id="stdSearchInput" class="plan-input" placeholder="Filter exercises by name or slug in real-time..." style="flex: 1;" oninput="filterStandards(this.value)">
+                <div class="modal-title">Strength Standards Library</div>
+                <div class="modal-sub">Browse benchmark lift targets for all 280+ strength exercises</div>
+                <div style="margin-top: 12px; display: flex; gap: 8px;">
+                    <input type="text" id="stdSearchInput" class="plan-input" placeholder="🔍  Search exercises by name or slug in real-time..." style="flex: 1;" oninput="filterStandards(this.value)">
                 </div>
             </div>
-            <div class="modal-body" style="max-height: 70vh;">
+            <div class="modal-body" style="max-height: 65vh;">
                 <table>
                     <thead>
                         <tr>
@@ -492,23 +806,24 @@ HTML_TEMPLATE = f"""
                 </table>
             </div>
             <div class="modal-footer">
-                <button class="btn-side-sec" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalStandards')">Close</button>
+                <button class="btn-tool" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalStandards')">Close</button>
             </div>
         </div>
     </div>
 
     <!-- ── 5. SPLIT DETAILS MODAL ──────────────────────────────────────── -->
     <div id="modalSplit" class="modal-overlay">
-        <div class="modal-window" style="width: 650px;">
+        <div class="modal-window" style="width: 660px;">
             <div class="modal-hdr">
                 <div class="modal-title">Current Split Details & History</div>
+                <div class="modal-sub">Overview of your current split cycle breakdown</div>
             </div>
             <div class="modal-body">
-                <div class="stat-card">
-                    <div class="stat-t">CURRENT SPLIT ROUTINE</div>
+                <div class="stat-card" style="background: rgba(30, 41, 59, 0.5);">
+                    <div class="stat-t">Current Routine</div>
                     <div id="splitOverview" style="font-size: 13px; margin-top: 6px; line-height: 1.6;"></div>
                 </div>
-                <div style="font-weight: bold; font-size: 13px; margin-top: 8px; color: #AAA;">Recent Split Sessions History:</div>
+                <div style="font-weight: 700; font-size: 13px; margin-top: 6px; color: var(--text-secondary);">Split Session Logs:</div>
                 <table>
                     <thead>
                         <tr><th>Date</th><th>Day</th><th>Exercises</th></tr>
@@ -517,32 +832,32 @@ HTML_TEMPLATE = f"""
                 </table>
             </div>
             <div class="modal-footer">
-                <button class="btn-side-sec" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalSplit')">Close</button>
+                <button class="btn-tool" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalSplit')">Close</button>
             </div>
         </div>
     </div>
 
     <!-- ── 6. ABOUT DIALOG MODAL ───────────────────────────────────────── -->
     <div id="modalAbout" class="modal-overlay">
-        <div class="modal-window" style="width: 380px;">
-            <div class="modal-hdr">
-                <div class="modal-title">About Iron Log</div>
+        <div class="modal-window" style="width: 400px;">
+            <div class="modal-hdr" style="text-align: center;">
+                <div class="modal-title">Iron Log</div>
+                <div class="modal-sub" id="aboutVerText">Version {__version__}</div>
             </div>
-            <div class="modal-body" style="text-align: center; gap: 8px; padding: 24px 20px;">
-                <div style="font-size: 24px; font-weight: bold;">Iron Log</div>
-                <div style="font-size: 13px; color: #888888;" id="aboutVerText">Version {__version__}</div>
-                <div style="font-size: 14px; color: #CCCCCC; margin-top: 8px;">Author: Rustem Nizamov</div>
-                <button class="btn-side-sec" style="margin: 16px auto 0 auto; justify-content: center; width: 180px;" onclick="pywebview.api.open_url('https://github.com/Rusya665/iron-log')">GitHub Repository</button>
+            <div class="modal-body" style="text-align: center; gap: 10px; padding: 24px 20px;">
+                <div style="font-size: 14px; color: var(--text-secondary);">Designed & built by Rustem Nizamov</div>
+                <div style="font-size: 12px; color: var(--text-muted);">High-Performance Local Strength & Progressive Overload Suite</div>
+                <button class="btn-side-sec" style="margin: 14px auto 0 auto; justify-content: center; width: 190px;" onclick="pywebview.api.open_url('https://github.com/Rusya665/iron-log')">GitHub Repository ↗</button>
             </div>
             <div class="modal-footer">
-                <button class="btn-side-sec" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalAbout')">Close</button>
+                <button class="btn-tool" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalAbout')">Close</button>
             </div>
         </div>
     </div>
 
     <!-- ── 7. PROFILE PICKER MODAL ─────────────────────────────────────── -->
     <div id="modalProfilePicker" class="modal-overlay">
-        <div class="modal-window" style="width: 520px;">
+        <div class="modal-window" style="width: 540px;">
             <div class="modal-hdr">
                 <div class="modal-title">Select Your Profile</div>
                 <div class="modal-sub">Switch active athlete account</div>
@@ -552,7 +867,7 @@ HTML_TEMPLATE = f"""
             </div>
             <div class="modal-footer">
                 <button class="btn-side-primary2" style="padding: 8px 14px;" onclick="openProfileCreator()">+ New Profile</button>
-                <button class="btn-side-sec" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalProfilePicker')">Close</button>
+                <button class="btn-tool" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalProfilePicker')">Close</button>
             </div>
         </div>
     </div>
@@ -566,11 +881,11 @@ HTML_TEMPLATE = f"""
             <div class="modal-body" style="gap: 12px;">
                 <input type="hidden" id="profEditIndex" value="-1">
                 <div>
-                    <label style="font-size: 12px; color: #AAA; display: block; margin-bottom: 4px;">Name:</label>
+                    <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Name:</label>
                     <input type="text" id="profNameInput" class="plan-input" style="width: 100%;" placeholder="e.g. Rustem">
                 </div>
                 <div>
-                    <label style="font-size: 12px; color: #AAA; display: block; margin-bottom: 4px;">Sex:</label>
+                    <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Sex:</label>
                     <div style="display: flex; gap: 20px; font-size: 13px;">
                         <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
                             <input type="radio" name="profSex" value="male" id="sexMale" checked> Male
@@ -581,17 +896,17 @@ HTML_TEMPLATE = f"""
                     </div>
                 </div>
                 <div>
-                    <label style="font-size: 12px; color: #AAA; display: block; margin-bottom: 4px;">Data Folder (sessions.py location):</label>
+                    <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Data Folder (sessions.py location):</label>
                     <div style="display: flex; gap: 8px;">
                         <input type="text" id="profDirInput" class="plan-input" style="flex: 1;" placeholder="C:/path/to/folder">
                         <button class="btn-tool" onclick="browseFolder()">Browse...</button>
                     </div>
-                    <div style="font-size: 11px; color: #666; margin-top: 4px;">Each user needs their own folder. Excel logs will be saved in a 'gym' subfolder.</div>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Each user needs their own folder. Excel logs will be saved in a 'gym' subfolder.</div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="btn-side-sec" style="padding: 8px 16px;" onclick="closeModal('modalProfileCreator')">Cancel</button>
-                <button class="btn-save-plan" onclick="saveProfileForm()">Save Profile</button>
+                <button class="btn-tool" style="padding: 8px 16px;" onclick="closeModal('modalProfileCreator')">Cancel</button>
+                <button class="btn-side-primary3" style="padding: 8px 18px; margin-left: auto;" onclick="saveProfileForm()">Save Profile</button>
             </div>
         </div>
     </div>
@@ -605,8 +920,8 @@ HTML_TEMPLATE = f"""
             </div>
             <div class="modal-body" id="missingMassesContainer" style="max-height: 50vh;"></div>
             <div class="modal-footer">
-                <button class="btn-side-sec" style="padding: 8px 16px;" onclick="closeModal('modalMissingMasses')">Cancel</button>
-                <button class="btn-save-plan" onclick="saveMissingMasses()">💾 Save Mass Values</button>
+                <button class="btn-tool" style="padding: 8px 16px;" onclick="closeModal('modalMissingMasses')">Cancel</button>
+                <button class="btn-side-primary3" style="padding: 8px 18px; margin-left: auto;" onclick="saveMissingMasses()">💾 Save Mass Values</button>
             </div>
         </div>
     </div>
@@ -645,7 +960,7 @@ HTML_TEMPLATE = f"""
                 await updateMenuState();
             }} catch (err) {{
                 console.error("Init Error:", err);
-                document.getElementById("sidebarStatus").innerText = "Init Error: " + err;
+                document.getElementById("sidebarStatus").innerText = "● Init Error: " + err;
             }}
         }}
 
@@ -666,8 +981,8 @@ HTML_TEMPLATE = f"""
                 const isActive = idx === pData.active_index;
                 const item = document.createElement("div");
                 item.className = "menu-item";
-                item.style.fontWeight = isActive ? "bold" : "normal";
-                item.innerHTML = `<span>${{isActive ? '✓ ' : ''}}${{p.name}}</span><span style="font-size: 10px; color: #888;">Select</span>`;
+                item.style.fontWeight = isActive ? "700" : "500";
+                item.innerHTML = `<span>${{isActive ? '✓ ' : ''}}${{p.name}}</span><span style="font-size: 10px; color: var(--text-muted);">Select</span>`;
                 item.onclick = async (e) => {{
                     e.stopPropagation();
                     closeAllMenus();
@@ -687,13 +1002,14 @@ HTML_TEMPLATE = f"""
 
         async function loadDashboard() {{
             if (!window.pywebview || !window.pywebview.api) return;
-            document.getElementById("sidebarStatus").innerText = "Loading...";
+            document.getElementById("sidebarStatus").innerText = "● Loading...";
             const data = await pywebview.api.get_active_data();
             if (!data.success) {{
-                document.getElementById("sidebarStatus").innerText = data.error;
+                document.getElementById("sidebarStatus").innerText = "● " + data.error;
                 return;
             }}
             document.getElementById("sidebarProfName").innerText = data.profile_name;
+            document.getElementById("avatarLetter").innerText = (data.profile_name || "U").charAt(0).toUpperCase();
             const s = data.stats;
             cachedStats = s;
 
@@ -701,11 +1017,11 @@ HTML_TEMPLATE = f"""
             document.getElementById("c1Val").innerText = (s.total_days || 0) + " Days";
             document.getElementById("c1Sub").innerText = (s.this_year_days || 0) + " this year · " + (s.this_month_days || 0) + " this month";
 
-            document.getElementById("c2Val").innerText = (s.current_split_weeks || 0).toFixed(1) + " Weeks";
+            document.getElementById("c2Val").innerText = (s.current_split_weeks || 0).toFixed(1) + " Wks";
             document.getElementById("c2Sub").innerText = (s.cycle_length || "N/A") + "-Day Split · started " + (s.current_split_start || "N/A");
 
             document.getElementById("c3Val").innerText = s.latest_workout_date || "N/A";
-            document.getElementById("c3Sub").innerText = "Day " + (s.latest_workout_day || "N/A");
+            document.getElementById("c3Sub").innerText = "Day " + (s.latest_workout_day || "N/A") + " Completed";
 
             // Workout Cards
             const grid = document.getElementById("sessionsGrid");
@@ -725,16 +1041,19 @@ HTML_TEMPLATE = f"""
                     `;
                 }});
                 
-                const hdrStr = typeof sess.day === 'number' ? `📅  ${{sess.date}}  ·  Day ${{sess.day}}` : `📅  ${{sess.date}}  ·  ${{sess.day}}`;
+                const dayLabel = typeof sess.day === 'number' ? `Day ${{sess.day}}` : `${{sess.day}}`;
                 card.innerHTML = `
-                    <div class="workout-card-hdr">${{hdrStr}}</div>
+                    <div class="workout-card-hdr">
+                        <span class="hdr-date">📅  ${{sess.date}}</span>
+                        <span class="hdr-pill">${{dayLabel}}</span>
+                    </div>
                     <div class="card-sep"></div>
-                    <div style="display: flex; flex-direction: column; gap: 3px;">${{exsHtml}}</div>
+                    <div class="ex-list">${{exsHtml}}</div>
                 `;
                 grid.appendChild(card);
             }});
 
-            document.getElementById("sidebarStatus").innerText = "Ready";
+            document.getElementById("sidebarStatus").innerText = "● System Ready";
         }}
 
         /* ── Hover Standards Tooltip ──────────────────────────────────────── */
@@ -749,7 +1068,7 @@ HTML_TEMPLATE = f"""
                 const tip = document.getElementById("standardsTooltip");
                 
                 if (!tableData || !tableData.standards || Object.keys(tableData.standards).length === 0) {{
-                    tip.innerHTML = `<div style="font-size: 11px; color: #AAA;">Standards not available for ${{tableData.name || exId}}</div>`;
+                    tip.innerHTML = `<div style="font-size: 11px; color: var(--text-secondary);">Standards not available for ${{tableData.name || exId}}</div>`;
                 }} else {{
                     let rowsHtml = "";
                     const targetBm = tableData.target_bm;
@@ -766,7 +1085,7 @@ HTML_TEMPLATE = f"""
                     }}
 
                     tip.innerHTML = `
-                        <div style="font-size: 11px; font-weight: bold; margin-bottom: 4px; color: #FFF;">${{tableData.name}} Standards</div>
+                        <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px; color: #FFF; font-family: 'Outfit', sans-serif;">${{tableData.name}} Standards</div>
                         <table>
                             <thead><tr><th>Mass</th><th>Beg</th><th>Nov</th><th>Int</th><th>Adv</th><th>Eli</th></tr></thead>
                             <tbody>${{rowsHtml}}</tbody>
@@ -774,10 +1093,10 @@ HTML_TEMPLATE = f"""
                     `;
                 }}
                 
-                tip.style.left = Math.min(x, window.innerWidth - 390) + "px";
-                tip.style.top = Math.min(y, window.innerHeight - 250) + "px";
+                tip.style.left = Math.min(x, window.innerWidth - 410) + "px";
+                tip.style.top = Math.min(y, window.innerHeight - 260) + "px";
                 tip.style.display = "block";
-            }}, 250);
+            }}, 220);
         }}
 
         function hideTooltip() {{
@@ -787,10 +1106,10 @@ HTML_TEMPLATE = f"""
 
         /* ── Actions & Dialogs ────────────────────────────────────────────── */
         async function generateExcel() {{
-            document.getElementById("sidebarStatus").innerText = "Generating Excel Log...";
+            document.getElementById("sidebarStatus").innerText = "● Generating Log...";
             const res = await pywebview.api.generate_excel();
             if (res.success) {{
-                document.getElementById("sidebarStatus").innerText = "✅ Created Excel log!";
+                document.getElementById("sidebarStatus").innerText = "✅ Generated Log";
                 document.getElementById("sidebarLastGen").innerText = "Last gen: " + res.time;
             }} else {{
                 document.getElementById("sidebarStatus").innerText = "❌ " + res.error;
@@ -799,23 +1118,23 @@ HTML_TEMPLATE = f"""
         }}
 
         async function openPlanCycler() {{
-            document.getElementById("sidebarStatus").innerText = "Opening Plan Next Cycle window...";
+            document.getElementById("sidebarStatus").innerText = "● Opening Planner...";
             await pywebview.api.open_planner_window();
-            document.getElementById("sidebarStatus").innerText = "Ready";
+            document.getElementById("sidebarStatus").innerText = "● System Ready";
         }}
 
         async function runScraper() {{
-            document.getElementById("sidebarStatus").innerText = "Running scraper...";
+            document.getElementById("sidebarStatus").innerText = "● Running scraper...";
             const res = await pywebview.api.run_scraper();
             if (res.success) {{
-                document.getElementById("sidebarStatus").innerText = "Scraper started!";
+                document.getElementById("sidebarStatus").innerText = "● Scraper active";
             }} else {{
-                document.getElementById("sidebarStatus").innerText = "Scraper error: " + res.error;
+                document.getElementById("sidebarStatus").innerText = "● Scraper error: " + res.error;
             }}
         }}
 
         async function triggerUpdateCheck() {{
-            document.getElementById("sidebarStatus").innerText = "Checking for updates...";
+            document.getElementById("sidebarStatus").innerText = "● Checking updates...";
             const res = await pywebview.api.check_updates();
             if (res.has_update) {{
                 if (confirm(`A new version (${{res.version}}) is available!\\nDo you want to open the download page?`)) {{
@@ -824,11 +1143,11 @@ HTML_TEMPLATE = f"""
             }} else {{
                 alert(`You are on the latest version (v${{res.current}}).`);
             }}
-            document.getElementById("sidebarStatus").innerText = "Ready";
+            document.getElementById("sidebarStatus").innerText = "● System Ready";
         }}
 
         async function runValidateSessions() {{
-            document.getElementById("sidebarStatus").innerText = "Validating sessions.py...";
+            document.getElementById("sidebarStatus").innerText = "● Validating...";
             const res = await pywebview.api.run_validate_sessions();
             if (res.success) {{
                 let msg = "✅ " + res.message;
@@ -837,7 +1156,7 @@ HTML_TEMPLATE = f"""
                     msg += "\\n\\nUse 🧪 Experimental → Fill-in Missing Masses to complete them.";
                 }}
                 alert(msg);
-                document.getElementById("sidebarStatus").innerText = "✅ Validation passed";
+                document.getElementById("sidebarStatus").innerText = "✅ Validated";
             }} else {{
                 alert("❌ " + res.error);
                 document.getElementById("sidebarStatus").innerText = "❌ Validation failed";
@@ -845,7 +1164,7 @@ HTML_TEMPLATE = f"""
         }}
 
         async function runBodymassPrefill() {{
-            document.getElementById("sidebarStatus").innerText = "Prefilling mass dates...";
+            document.getElementById("sidebarStatus").innerText = "● Prefilling...";
             const res = await pywebview.api.run_bodymass_prefill();
             if (res.success) {{
                 if (res.count === 0) {{
@@ -853,7 +1172,7 @@ HTML_TEMPLATE = f"""
                 }} else {{
                     alert(`✅ Added ${{res.count}} date(s) to BODYMASS_LOG with mass=None in sessions.py.`);
                 }}
-                document.getElementById("sidebarStatus").innerText = "Ready";
+                document.getElementById("sidebarStatus").innerText = "● System Ready";
             }} else {{
                 alert("Prefill Error: " + res.error);
             }}
@@ -875,9 +1194,9 @@ HTML_TEMPLATE = f"""
                 const row = document.createElement("div");
                 row.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 8px;";
                 row.innerHTML = `
-                    <span style="font-size: 13px; width: 110px;">${{d}}</span>
+                    <span style="font-size: 13px; width: 110px; font-family: 'JetBrains Mono', monospace;">${{d}}</span>
                     <input type="number" step="0.1" class="plan-input missing-mass-input" data-date="${{d}}" placeholder="e.g. 83.5" style="flex: 1;">
-                    <span style="color: #888; font-size: 12px;">kg</span>
+                    <span style="color: var(--text-secondary); font-size: 12px;">kg</span>
                 `;
                 container.appendChild(row);
             }});
@@ -920,11 +1239,11 @@ HTML_TEMPLATE = f"""
                 const isAct = idx === data.active_index;
                 const card = document.createElement("div");
                 card.className = "stat-card clickable";
-                card.style.borderColor = isAct ? "#3B82F6" : "#2E2E2E";
+                card.style.borderColor = isAct ? "rgba(59, 130, 246, 0.6)" : "var(--border-glass)";
                 card.innerHTML = `
-                    <div style="font-weight: bold; font-size: 15px; color: ${{isAct ? '#60A5FA' : '#FFF'}};">${{p.name}}</div>
-                    <div style="font-size: 11px; color: #888;">${{p.sessions_dir}}</div>
-                    <div style="display: flex; gap: 6px; margin-top: 8px;">
+                    <div style="font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 16px; color: ${{isAct ? '#60A5FA' : '#FFF'}};">${{p.name}}</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">${{p.sessions_dir}}</div>
+                    <div style="display: flex; gap: 6px; margin-top: 10px;">
                         <button class="btn-tool" onclick="selectProf(${{idx}})">Select</button>
                         <button class="btn-tool" onclick="editProf(${{idx}})">Edit</button>
                         <button class="btn-tool" style="color: #F87171;" onclick="deleteProf(${{idx}}, '${{p.name}}')">Delete</button>
@@ -1007,17 +1326,16 @@ HTML_TEMPLATE = f"""
             const list = await pywebview.api.search_standards(query);
             const tbody = document.getElementById("stdTbody");
             tbody.innerHTML = "";
-            // Loads ALL exercises without arbitrary limit
             (list || []).forEach(item => {{
                 const tr = document.createElement("tr");
                 tr.innerHTML = `
-                    <td style="font-weight: 500;">${{item.name}}</td>
+                    <td style="font-weight: 600;">${{item.name}}</td>
                     <td><span class="badge-slug">${{item.slug}}</span></td>
                     <td>${{item.beg}}</td><td>${{item.nov}}</td><td>${{item.int}}</td><td>${{item.adv}}</td><td>${{item.eli}}</td>
                     <td style="display: flex; gap: 4px;">
                         <button class="btn-tool" onclick="pywebview.api.copy_clipboard('${{item.slug}}')">Copy</button>
                         <button class="btn-tool" onclick="pywebview.api.copy_clipboard('${{item.slug.replace(/-/g, '_')}} = \\'${{item.slug}}\\'')">Copy Py</button>
-                        <button class="btn-tool" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${{item.slug}}')">View</button>
+                        <button class="btn-tool" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${{item.slug}}')">View ↗</button>
                     </td>
                 `;
                 tbody.appendChild(tr);
@@ -1038,7 +1356,7 @@ HTML_TEMPLATE = f"""
             (s.split_sessions_details || []).forEach(sess => {{
                 const tr = document.createElement("tr");
                 tr.innerHTML = `
-                    <td>${{sess.date_str}}</td>
+                    <td style="font-family: 'JetBrains Mono', monospace;">${{sess.date_str}}</td>
                     <td><span class="badge-slug">Day ${{sess.day}}</span></td>
                     <td>${{(sess.exercises || []).join(", ")}}</td>
                 `;
@@ -1087,47 +1405,79 @@ PLANNER_HTML_TEMPLATE = r"""
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iron Log - Plan Next Cycle</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: "Roboto", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        :root {
+            --bg-app: #0A0D14;
+            --bg-card: rgba(18, 24, 38, 0.75);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --text-primary: #FFFFFF;
+            --text-secondary: #94A3B8;
+            --text-muted: #64748B;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
         body {
-            background-color: #121212;
-            color: #FFFFFF;
+            background-color: var(--bg-app);
+            color: var(--text-primary);
             height: 100vh;
             display: flex;
             flex-direction: column;
             overflow: hidden;
             user-select: none;
+            background-image: 
+                radial-gradient(circle at 20% 15%, rgba(124, 58, 237, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 80% 85%, rgba(37, 99, 235, 0.08) 0%, transparent 40%);
         }
 
-        /* Custom Scrollbars */
-        ::-webkit-scrollbar { width: 8px; height: 8px; }
-        ::-webkit-scrollbar-track { background: #121212; }
-        ::-webkit-scrollbar-thumb { background: #2E2E2E; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #444444; }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 7px; height: 7px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); }
 
         header {
-            background: #18181C;
-            border-bottom: 1px solid #28282E;
+            background: rgba(15, 20, 32, 0.95);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-glass);
             padding: 16px 24px;
             display: flex;
             align-items: center;
             justify-content: space-between;
         }
-        .header-title { font-size: 18px; font-weight: 800; color: #FFFFFF; }
-        .header-sub { font-size: 12px; color: #888888; margin-top: 2px; }
+        .header-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 20px;
+            font-weight: 800;
+            color: #FFFFFF;
+            letter-spacing: -0.3px;
+        }
+        .header-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
 
         main {
             flex: 1;
             overflow-y: auto;
-            padding: 18px 24px;
+            padding: 20px 24px;
             display: flex;
             flex-direction: column;
-            gap: 14px;
+            gap: 16px;
         }
 
         footer {
-            background: #141416;
-            border-top: 1px solid #222226;
+            background: rgba(10, 14, 23, 0.9);
+            backdrop-filter: blur(16px);
+            border-top: 1px solid var(--border-glass);
             padding: 14px 24px;
             display: flex;
             align-items: center;
@@ -1136,36 +1486,43 @@ PLANNER_HTML_TEMPLATE = r"""
 
         /* Cycler Day Box */
         .plan-day-card {
-            background-color: #1A1A1E;
-            border: 1px solid #2A2A30;
-            border-radius: 10px;
-            padding: 14px;
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: 12px;
+            padding: 16px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            gap: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
         }
         .plan-day-hdr {
-            background-color: #222228;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
             border-radius: 8px;
-            padding: 8px 12px;
+            padding: 8px 14px;
             display: flex;
             align-items: center;
             gap: 12px;
         }
         .day-pill {
-            background: linear-gradient(135deg, #00695C, #00897B);
-            color: white; font-weight: 800; font-size: 12px;
-            border-radius: 5px; padding: 5px 12px; letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #00897B, #004D40);
+            color: white; font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 12px;
+            border-radius: 5px; padding: 4px 12px; letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(0, 137, 123, 0.3);
         }
-        .date-label { font-size: 12px; font-weight: 600; color: #888888; }
+        .date-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
 
         .plan-input {
-            background-color: #222226; color: #FFFFFF; border: 1px solid #33333A;
+            background: rgba(255, 255, 255, 0.05);
+            color: #FFFFFF; border: 1px solid rgba(255, 255, 255, 0.1);
             border-radius: 6px; padding: 7px 10px; font-size: 12px; font-weight: 500; outline: none;
-            transition: all 0.15s;
+            transition: all 0.15s ease;
         }
-        .plan-input:focus { border-color: #3B82F6; background-color: #26262C; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2); }
+        .plan-input:focus {
+            border-color: #3B82F6; background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
         .plan-input.center { text-align: center; }
 
         .plan-row-grid {
@@ -1175,77 +1532,81 @@ PLANNER_HTML_TEMPLATE = r"""
             align-items: center;
         }
         .plan-col-head {
-            font-size: 11px; font-weight: 700; color: #666666; text-transform: uppercase;
+            font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;
             letter-spacing: 0.5px; padding: 0 4px;
         }
         .plan-item-row {
-            background-color: #16161A; border: 1px solid #24242A; border-radius: 6px;
-            padding: 6px 8px; transition: background 0.15s;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 6px; padding: 6px 8px; transition: all 0.15s;
         }
-        .plan-item-row:hover { background-color: #1C1C22; border-color: #2E2E36; }
+        .plan-item-row:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.08);
+        }
 
         .order-btn-group { display: flex; gap: 2px; }
         .btn-arrow {
-            background: #25252A; color: #AAA; border: 1px solid #33333C;
+            background: rgba(255, 255, 255, 0.05); color: #AAA; border: 1px solid rgba(255, 255, 255, 0.08);
             border-radius: 4px; width: 24px; height: 26px; cursor: pointer; font-size: 10px;
             display: flex; align-items: center; justify-content: center; transition: all 0.15s;
         }
         .btn-arrow:hover { background: #3B82F6; color: #FFF; border-color: #3B82F6; }
 
         .btn-pill-inc {
-            background: #1C2E24; color: #4ADE80; border: 1px solid #234E36;
+            background: rgba(34, 197, 94, 0.15); color: #4ADE80; border: 1px solid rgba(34, 197, 94, 0.3);
             border-radius: 5px; padding: 4px 6px; font-size: 10px; font-weight: 700; cursor: pointer;
             transition: all 0.15s;
         }
         .btn-pill-inc:hover { background: #22C55E; color: #000; }
         
         .btn-pill-rep {
-            background: #2D1A3E; color: #C084FC; border: 1px solid #4C266D;
+            background: rgba(192, 132, 252, 0.15); color: #C084FC; border: 1px solid rgba(192, 132, 252, 0.3);
             border-radius: 5px; padding: 4px 6px; font-size: 10px; font-weight: 700; cursor: pointer;
             transition: all 0.15s;
         }
         .btn-pill-rep:hover { background: #A855F7; color: #000; }
 
         .btn-trash {
-            background: #331A1A; color: #F87171; border: 1px solid #552222;
+            background: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.3);
             border-radius: 5px; width: 26px; height: 26px; cursor: pointer; font-size: 11px;
             display: flex; align-items: center; justify-content: center; transition: all 0.15s;
         }
         .btn-trash:hover { background: #EF4444; color: #FFF; }
 
         .btn-add-ex {
-            background: linear-gradient(135deg, #0277BD, #0288D1);
+            background: linear-gradient(135deg, #0288D1, #01579B);
             color: white; font-weight: 700; font-size: 12px; border: none;
             border-radius: 6px; padding: 6px 14px; cursor: pointer; transition: all 0.15s;
         }
         .btn-add-ex:hover { filter: brightness(1.15); }
 
         .btn-del-day {
-            background: #3B1C1C; color: #FCA5A5; border: 1px solid #662222;
+            background: rgba(220, 38, 38, 0.15); color: #FCA5A5; border: 1px solid rgba(220, 38, 38, 0.3);
             border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
         }
         .btn-del-day:hover { background: #DC2626; color: #FFF; }
 
         .btn-save-plan {
-            background: linear-gradient(135deg, #1B5E20, #2E7D32);
-            color: white; font-weight: 800; font-size: 13px; border: none;
-            border-radius: 7px; padding: 10px 24px; cursor: pointer; margin-left: auto;
-            box-shadow: 0 2px 8px rgba(27, 94, 32, 0.4); transition: all 0.15s;
+            background: linear-gradient(135deg, #059669, #10B981);
+            color: white; font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 13px; border: none;
+            border-radius: 8px; padding: 11px 24px; cursor: pointer; margin-left: auto;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
         }
-        .btn-save-plan:hover { filter: brightness(1.15); transform: translateY(-1px); }
+        .btn-save-plan:hover { filter: brightness(1.15); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5); }
 
         .btn-sec {
-            background-color: #252525; color: #BBBBBB; font-size: 12px; font-weight: bold;
-            border-radius: 7px; padding: 10px 18px; border: 1px solid #333; cursor: pointer;
+            background: rgba(255, 255, 255, 0.05); color: var(--text-secondary); font-size: 12px; font-weight: 700;
+            border-radius: 8px; padding: 10px 18px; border: 1px solid rgba(255, 255, 255, 0.08); cursor: pointer;
             transition: all 0.15s;
         }
-        .btn-sec:hover { background-color: #333333; color: #FFF; border-color: #444; }
+        .btn-sec:hover { background: rgba(255, 255, 255, 0.1); color: #FFF; }
 
         .btn-primary2 {
-            background: linear-gradient(135deg, #6A1B9A, #7B1FA2);
-            color: #FFFFFF; font-size: 12px; font-weight: bold;
-            border-radius: 7px; padding: 10px 18px; border: none; cursor: pointer;
-            transition: all 0.15s;
+            background: linear-gradient(135deg, #7C3AED, #C026D3);
+            color: #FFFFFF; font-size: 12px; font-weight: 700;
+            border-radius: 8px; padding: 10px 18px; border: none; cursor: pointer;
+            box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3); transition: all 0.15s;
         }
         .btn-primary2:hover { filter: brightness(1.15); }
     </style>
@@ -1254,7 +1615,7 @@ PLANNER_HTML_TEMPLATE = r"""
     <header>
         <div>
             <div class="header-title" id="cyclerTitle">Plan Next Cycle</div>
-            <div class="header-sub">Define your training split. Type exercise variable name, sets, reps, mass, and notes.</div>
+            <div class="header-sub">Configure your training split. Type exercise variable name, sets, reps, mass, and notes.</div>
         </div>
     </header>
 
@@ -1298,10 +1659,10 @@ PLANNER_HTML_TEMPLATE = r"""
                                 <button class="btn-arrow" onclick="moveEx(${dayIdx}, ${exIdx}, -1)" ${exIdx===0?'disabled style="opacity:0.3;"':''}>▲</button>
                                 <button class="btn-arrow" onclick="moveEx(${dayIdx}, ${exIdx}, 1)" ${exIdx===d.exercises.length-1?'disabled style="opacity:0.3;"':''}>▼</button>
                             </div>
-                            <input type="text" class="plan-input" value="${ex.var_name}" oninput="updateEx(${dayIdx}, ${exIdx}, 'var_name', this.value)" placeholder="exercise_slug">
+                            <input type="text" class="plan-input" style="font-family: 'JetBrains Mono', monospace;" value="${ex.var_name}" oninput="updateEx(${dayIdx}, ${exIdx}, 'var_name', this.value)" placeholder="exercise_slug">
                             <input type="number" class="plan-input center" value="${ex.sets}" oninput="updateEx(${dayIdx}, ${exIdx}, 'sets', this.value)">
-                            <input type="text" class="plan-input center" value="${ex.reps}" oninput="updateEx(${dayIdx}, ${exIdx}, 'reps', this.value)">
-                            <input type="text" class="plan-input center" value="${ex.mass}" oninput="updateEx(${dayIdx}, ${exIdx}, 'mass', this.value)">
+                            <input type="text" class="plan-input center" style="font-family: 'JetBrains Mono', monospace;" value="${ex.reps}" oninput="updateEx(${dayIdx}, ${exIdx}, 'reps', this.value)">
+                            <input type="text" class="plan-input center" style="font-family: 'JetBrains Mono', monospace;" value="${ex.mass}" oninput="updateEx(${dayIdx}, ${exIdx}, 'mass', this.value)">
                             <input type="text" class="plan-input" value="${ex.comment || ''}" oninput="updateEx(${dayIdx}, ${exIdx}, 'comment', this.value)" placeholder="comment">
                             <div style="display: flex; gap: 4px; align-items: center;">
                                 <button class="btn-pill-inc" onclick="incMass(${dayIdx}, ${exIdx})">+2.5kg</button>
@@ -1511,7 +1872,7 @@ class WebViewBridgeApi:
             width=1100,
             height=750,
             min_size=(860, 560),
-            background_color="#121212",
+            background_color="#0A0D14",
         )
         return {"success": True}
 
@@ -2050,10 +2411,10 @@ def run_webview_app():
         title=f"Iron Log - Strength Tracker v{__version__} (PyWebView Edition)",
         html=HTML_TEMPLATE,
         js_api=api,
-        width=1150,
-        height=720,
+        width=1160,
+        height=740,
         min_size=(960, 600),
-        background_color="#121212",
+        background_color="#0A0D14",
     )
     webview.start(debug=False)
 

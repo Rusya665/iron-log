@@ -1,9 +1,11 @@
 name: Build and Release
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main
+      - gui-engines-comparison
     paths-ignore:
       - '**.md'
       - 'media/**'
@@ -40,25 +42,39 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
+        pip install pyinstaller
 
-    - name: Inject Version into Python code
+    - name: Inject Version if Tagged
+      shell: pwsh
       run: |
-        $VERSION = '${{ github.ref_name }}'.TrimStart('v')
-        (Get-Content core/version.py) -replace '__version__ = ".*"', "__version__ = ""$VERSION""" | Set-Content core/version.py
+        if ('${{ github.ref }}' -like 'refs/tags/v*') {
+            $VERSION = '${{ github.ref_name }}'.TrimStart('v')
+            (Get-Content core/version.py) -replace '__version__ = ".*"', "__version__ = ""$VERSION""" | Set-Content core/version.py
+            (Get-Content installer/iron_log_setup.iss) -replace '#define MyAppVersion ".*"', "#define MyAppVersion ""$VERSION""" | Set-Content installer/iron_log_setup.iss
+        }
 
     - name: Build with PyInstaller
       run: |
         pyinstaller iron_log.spec
 
-    - name: Inject Version into Installer
-      run: |
-        $VERSION = '${{ github.ref_name }}'.TrimStart('v')
-        (Get-Content installer/iron_log_setup.iss) -replace '#define MyAppVersion ".*"', "#define MyAppVersion ""$VERSION""" | Set-Content installer/iron_log_setup.iss
-
     - name: Compile Inno Setup Installer
       uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
       with:
         path: installer/iron_log_setup.iss
+
+    - name: Upload Installer Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: IronLog-Setup-Windows
+        path: installer/Output/*.exe
+        if-no-files-found: warn
+
+    - name: Upload Standalone EXE Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: IronLog-Standalone-EXE
+        path: dist/IronLog.exe
+        if-no-files-found: warn
 
     - name: Extract Tag Message
       if: startsWith(github.ref, 'refs/tags/')
