@@ -2,10 +2,9 @@ import json
 import os
 import re
 import sys
+import tkinter as tk
 from datetime import datetime
-from tkinter import messagebox
-
-import customtkinter as ctk
+from tkinter import messagebox, ttk
 
 # Core file paths
 CORE_DIR = os.path.join(os.path.dirname(__file__), "..", "core")
@@ -23,15 +22,7 @@ def parse_raw_text(raw_text: str) -> dict:
         if not line:
             continue
 
-        # Try finding numbers with spaces first
         numbers = re.findall(r"\d+", line)
-
-        # Heuristic for long digit strings (e.g., 501525385371)
-        if len(numbers) == 1 and len(numbers[0]) > 8:
-            # Assuming 6 pairs or triplets of digits (BM, Beg, Nov, Int, Adv, Elite)
-            # This is complex to automate perfectly, so we'll try to find a pattern or skip.
-            # Most standards are 2-3 digits.
-            pass
 
         if len(numbers) >= 6:
             try:
@@ -50,141 +41,135 @@ def parse_raw_text(raw_text: str) -> dict:
 
 def write_to_standards(exercise_id: str, data: dict):
     """Updates the EXERCISE_STANDARDS dictionary in the standards file."""
-    # This is a bit complex as we need to maintain the python file structure
-    # We'll import the current dict, update it, and regenerate the file
-
-    # 1. Load the current standards
-    # Ensure project root is in path
     root_dir = os.path.join(os.path.dirname(__file__), "..")
     if root_dir not in sys.path:
         sys.path.append(root_dir)
 
-    try:
-        from core.standards import EXERCISE_STANDARDS
-    except (ImportError, AttributeError):
-        EXERCISE_STANDARDS = {}
+    import importlib
+    from core import standards
 
-    # 2. Update with new data
-    # Create the entry structure: { 'name': '...', 'male': { ... }, 'female': { ... } }
-    # We'll assume the GUI entry is for a specific gender or both?
-    # For simplicity, we'll try to guess or use a default name
-    display_name = exercise_id.replace("-", " ").title()
-    if exercise_id in EXERCISE_STANDARDS:
-        display_name = EXERCISE_STANDARDS[exercise_id].get("name", display_name)
+    importlib.reload(standards)
+    current_standards = getattr(standards, "EXERCISE_STANDARDS", {})
 
-    EXERCISE_STANDARDS[exercise_id] = {
-        "name": display_name,
-        "male": data,  # We'll assume input is male for now or prompt?
-        # For simplicity, let's just use it as the data source
-    }
+    current_standards[exercise_id] = data
 
-    # 3. Regenerate core/standards.py
-    # We need the core logic part first
-    with open(STANDARDS_FILE, "r", encoding="utf-8") as f:
-        file_content = f.read()
+    header = '''import re
 
-    core_logic_marker = (
-        "# Consolidated exercise standards database\nEXERCISE_STANDARDS = {"
-    )
-    if core_logic_marker not in file_content:
-        # If it's the old format, we can't easily auto-migrate without risks
-        # But we previously reset it, so it should be fine.
-        print(
-            "Warning: standards.py does not have the dictionary marker. Please run scraper first."
-        )
-        return
+def get_exercise_standard(exercise_id: str, target_date_str: str, bodymass_log: dict, level: str = "Intermediate") -> int:
+    """
+    Retrieves the exercise standard from the consolidated EXERCISE_STANDARDS dictionary.
+    Requires an exact match on the exercise_id.
+    """
+    if not bodymass_log or not exercise_id:
+        return 0
+        
+    dates = sorted(bodymass_log.keys())
+    if not dates:
+        return 0
+        
+    applicable_date = dates[0]
+    for d in dates:
+        if d <= target_date_str:
+            applicable_date = d
+        else:
+            break
+            
+    bm_data = bodymass_log[applicable_date]
+    current_bm = bm_data if isinstance(bm_data, (int, float)) else bm_data.get("mass", 0)
+    
+    if not current_bm:
+        return 0
+        
+    rounded_bm = int(round(current_bm / 5.0) * 5.0)
+    rounded_bm = max(50, min(rounded_bm, 140))
+    
+    if exercise_id not in EXERCISE_STANDARDS:
+        return 0
+        
+    table = EXERCISE_STANDARDS[exercise_id]
+    available_bms = sorted(table.keys())
+    if not available_bms:
+        return 0
+        
+    clipped_bm = max(available_bms[0], min(rounded_bm, available_bms[-1]))
+    return table[clipped_bm].get(level, 0)
 
-    core_part = file_content.split(core_logic_marker)[0] + core_logic_marker + "\n"
+# Consolidate exercise standards database
+EXERCISE_STANDARDS = {
+'''
 
-    # Format the entire dictionary
-    dict_content = ""
-    for slug, info in sorted(EXERCISE_STANDARDS.items()):
-        dict_content += f"    '{slug}': {{\n"
-        dict_content += f"        'name': '{info['name']}',\n"
-        for gender in ["male", "female"]:
-            g_data = info.get(gender)
-            if g_data:
-                dict_content += f"        '{gender}': {{\n"
-                for bm, lvls in sorted(g_data.items()):
-                    lvls_str = ", ".join([f"'{k}': {v}" for k, v in lvls.items()])
-                    dict_content += f"            {bm}: {{{lvls_str}}},\n"
-                dict_content += "        }},\n"
-        dict_content += "    }},\n"
-
-    final_content = core_part + dict_content + "}\n"
+    content = header
+    for ex_id, std_data in sorted(current_standards.items()):
+        content += f'    "{ex_id}": {{\n'
+        for bm, levels in sorted(std_data.items()):
+            content += f"        {bm}: {levels},\n"
+        content += "    },\n"
+    content += "}\n"
 
     with open(STANDARDS_FILE, "w", encoding="utf-8") as f:
-        f.write(final_content)
+        f.write(content)
 
 
-class StandardsParserApp(ctk.CTk):
+class StandardsParserApp(tk.Tk):
+
     def __init__(self):
         super().__init__()
 
-        self.title("Iron Log - Standards Parser")
-        self.geometry("700x600")
+        self.title("Iron Log - Standards Parser Tool")
+        self.geometry("750x650")
 
-        # Load registry
-        self.exercises = self.load_exercise_registry()
-
-        # Layout
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
 
-        # 1. Header & ID Selection
-        self.top_frame = ctk.CTkFrame(self)
-        self.top_frame.grid(row=0, column=0, padx=20, pady=10, sticky="ew")
+        # 1. Exercise Registry Selector
+        self.top_frame = ttk.Frame(self)
+        self.top_frame.grid(row=0, column=0, padx=20, pady=(20, 10), sticky="ew")
 
-        self.lbl_ex = ctk.CTkLabel(
-            self.top_frame, text="Select Exercise ID:", font=ctk.CTkFont(weight="bold")
+        ttk.Label(self.top_frame, text="Select Target Exercise:").pack(
+            side="left", padx=(0, 10)
         )
-        self.lbl_ex.pack(side="left", padx=10, pady=10)
 
+        self.registry = self.load_exercise_registry()
         exercise_names = (
-            [f"{ex.id} ({ex.display_name})" for ex in self.exercises]
-            if self.exercises
+            [f"{ex.id} ({ex.name})" for ex in self.registry]
+            if self.registry
             else ["No Registry Found"]
         )
-        self.ex_var = ctk.StringVar(value=exercise_names[0] if exercise_names else "")
-        self.opt_ex = ctk.CTkOptionMenu(
-            self.top_frame, values=exercise_names, variable=self.ex_var, width=300
+
+        self.ex_var = tk.StringVar(value=exercise_names[0] if exercise_names else "")
+        self.opt_ex = ttk.Combobox(
+            self.top_frame, values=exercise_names, textvariable=self.ex_var, width=40, state="readonly"
         )
         self.opt_ex.pack(side="left", padx=10, pady=10)
 
         # 2. Raw Text Input
-        self.lbl_hint = ctk.CTkLabel(
+        self.lbl_hint = ttk.Label(
             self, text="Paste raw table data below (BM, Beg, Nov, Int, Adv, Elite):"
         )
         self.lbl_hint.grid(row=1, column=0, padx=20, pady=(10, 0), sticky="w")
 
-        self.txt_input = ctk.CTkTextbox(self, height=300)
+        self.txt_input = tk.Text(self, height=18, font=("Consolas", 10), bg="#1e1e1e", fg="#ffffff", insertbackground="white")
         self.txt_input.grid(row=2, column=0, padx=20, pady=10, sticky="nsew")
 
         # 3. Actions
-        self.btn_frame = ctk.CTkFrame(self)
+        self.btn_frame = ttk.Frame(self)
         self.btn_frame.grid(row=3, column=0, padx=20, pady=10, sticky="ew")
-        self.btn_frame.grid_columnconfigure((0, 1), weight=1)
 
-        self.btn_clear = ctk.CTkButton(
-            self.btn_frame, text="Clear", command=self.clear_input, fg_color="gray"
+        self.btn_clear = ttk.Button(
+            self.btn_frame, text="Clear", command=self.clear_input
         )
-        self.btn_clear.grid(row=0, column=0, padx=10, pady=10)
+        self.btn_clear.pack(side="left", padx=10, pady=10)
 
-        self.btn_save = ctk.CTkButton(
+        self.btn_save = ttk.Button(
             self.btn_frame,
             text="PARSE & SAVE TO STANDARDS.PY",
             command=self.process,
-            fg_color="green",
-            hover_color="darkgreen",
         )
-        self.btn_save.grid(row=0, column=1, padx=10, pady=10)
+        self.btn_save.pack(side="right", padx=10, pady=10)
 
     def load_exercise_registry(self):
         """Attempts to load EXERCISE_REGISTRY from sessions.py using config."""
         if not os.path.exists(CONFIG_FILE):
-            messagebox.showwarning(
-                "Config Missing", "Please run main.py first to configure session paths."
-            )
             return []
 
         with open(CONFIG_FILE, "r") as f:
@@ -194,21 +179,16 @@ class StandardsParserApp(ctk.CTk):
         if not sessions_dir or not os.path.exists(sessions_dir):
             return []
 
-        # Add to path to import
         if sessions_dir not in sys.path:
             sys.path.insert(0, sessions_dir)
 
-        # Add project root to path so sessions.py can 'from core.models import ...'
         root_dir = os.path.join(os.path.dirname(__file__), "..")
         if root_dir not in sys.path:
             sys.path.append(root_dir)
 
         try:
-            # Proactively reload if already imported (e.g. during multiple GUI runs)
             import importlib
-
             import sessions
-
             importlib.reload(sessions)
             return sessions.EXERCISE_REGISTRY
         except Exception as e:
@@ -229,9 +209,7 @@ class StandardsParserApp(ctk.CTk):
             messagebox.showerror("Error", "No exercise ID selected.")
             return
 
-        # Extract ID from "id (display name)"
         exercise_id = selected_str.split(" (")[0]
-
         parsed = parse_raw_text(raw_text)
         if not parsed:
             messagebox.showerror(
@@ -252,8 +230,5 @@ class StandardsParserApp(ctk.CTk):
 
 
 if __name__ == "__main__":
-    ctk.set_appearance_mode("System")
-    ctk.set_default_color_theme("blue")
-
     app = StandardsParserApp()
     app.mainloop()

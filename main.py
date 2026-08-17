@@ -6,14 +6,9 @@ import sys
 sys.path.append(os.path.dirname(__file__))
 
 
-def run_gui(engine: str = "webview"):
-    if engine == "ctk":
-        from ui.desktop import IronLogApp
-        app = IronLogApp()
-        app.mainloop()
-    else:
-        from ui.desktop_webview import run_webview_app
-        run_webview_app()
+def run_gui():
+    from ui.desktop import run_desktop_app
+    run_desktop_app()
 
 
 def run_cli(args):
@@ -58,18 +53,12 @@ def run_cli(args):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Iron Log Launcher")
+    parser = argparse.ArgumentParser(description="Iron Log - Strength Tracker")
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
     parser.add_argument("--reconfigure", action="store_true", help="[CLI Only] Prompt to reconfigure paths")
-    parser.add_argument(
-        "--gui",
-        choices=["webview", "ctk"],
-        default="webview",
-        help="Select GUI engine: webview (PyWebView Modern Edge - Default) or ctk (CustomTkinter Fallback)",
-    )
     args = parser.parse_args()
 
     if args.cli:
         run_cli(args)
     else:
-        run_gui(args.gui)
+        run_gui()

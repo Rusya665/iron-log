@@ -1,1840 +1,2138 @@
+"""PyWebView (Microsoft Edge WebView2) Desktop GUI for Iron Log.
+
+Ultra-modern, state-of-the-art dark glassmorphic interface:
+- Modern Typography: Google Fonts 'Outfit' (headers & metrics) + 'Inter' (data & body)
+- Glassmorphic Elevated Surfaces & Ambient Glow Accents
+- Top Desktop Menu Bar (App, Settings, Profiles, 🧪 Experimental)
+- Dedicated Standalone Dynamic Plan Cycler Window
+- Real-time Strength Standards Hover Tooltip & Full 280+ Library Browser
+- Profile Manager & Switcher Modals
+- Bodymass Prefill & Fill-in Missing Masses Modals
+- sessions.py Validator & Scraper Integration
+- Multi-threaded Excel Generation
+"""
+
+import os
+import sys
+
+# Ensure project root is in sys.path when invoked directly
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+
+import copy
 import glob
 import importlib
-import os
+import json
 import re
 import subprocess
-import sys
 import tempfile
 import threading
-import time
-import tkinter as tk
 import webbrowser
 from datetime import datetime, timedelta
-from tkinter import messagebox
+from typing import Any, Dict, List, Optional
 
-import customtkinter as ctk
-from CTkMenuBar import CTkTitleMenu, CustomDropdownMenu
+import webview
 
+from core.models import Log
+from core.plan_generator import (
+    PlannedExercise,
+    PlannedSession,
+    build_planned_sessions,
+    calculate_gym_stats,
+    days_to_generate,
+    detect_cycle,
+    get_genuinely_new_exercises,
+    write_planned_sessions,
+)
 from core.profile_manager import Profile, ProfileManager
-from core.updater import check_for_updates, download_and_install_update
+from core.standards import EXERCISE_STANDARDS, get_tiered_standards
+from core.updater import check_for_updates
 from core.version import __version__
 from core.xlsx_generator import TrainingLogProcessor
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. MAIN APPLICATION HTML TEMPLATE
+# ─────────────────────────────────────────────────────────────────────────────
+HTML_TEMPLATE = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iron Log</title>
+    <!-- Google Fonts: Outfit (Metrics & Headers) + Inter (Interface & Data) + JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Outfit:wght@500;600;700;800;900&display=swap" rel="stylesheet">
+    
+    <style>
+        :root {{
+            --bg-app: #0A0D14;
+            --bg-sidebar: rgba(13, 17, 26, 0.95);
+            --bg-card: rgba(18, 24, 38, 0.72);
+            --bg-card-hover: rgba(24, 32, 50, 0.85);
+            --bg-glass-modal: rgba(15, 20, 32, 0.92);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --border-glass-hover: rgba(99, 102, 241, 0.4);
+            
+            --text-primary: #FFFFFF;
+            --text-secondary: #94A3B8;
+            --text-muted: #64748B;
+            
+            --accent-blue-start: #2563EB;
+            --accent-blue-end: #06B6D4;
+            --accent-purple-start: #7C3AED;
+            --accent-purple-end: #C026D3;
+            --accent-emerald-start: #059669;
+            --accent-emerald-end: #10B981;
+            --accent-amber-start: #D97706;
+            --accent-amber-end: #F59E0B;
+            
+            --radius-sm: 6px;
+            --radius-md: 10px;
+            --radius-lg: 14px;
+            --radius-xl: 18px;
+        }}
 
-import functools
+        * {{
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }}
 
-@functools.lru_cache(maxsize=32)
-def resource_path(relative_path):
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    if getattr(sys, "frozen", False):
-        base_path = sys._MEIPASS
-    else:
-        base_path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    return os.path.join(base_path, relative_path)
+        body {{
+            background-color: var(--bg-app);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(37, 99, 235, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 85% 85%, rgba(124, 58, 237, 0.08) 0%, transparent 40%);
+        }}
 
+        /* Modern Custom Scrollbar */
+        ::-webkit-scrollbar {{ width: 7px; height: 7px; }}
+        ::-webkit-scrollbar-track {{ background: transparent; }}
+        ::-webkit-scrollbar-thumb {{ background: rgba(255, 255, 255, 0.14); border-radius: 4px; }}
+        ::-webkit-scrollbar-thumb:hover {{ background: rgba(255, 255, 255, 0.28); }}
 
-ctk.set_appearance_mode("Dark")
-ctk.set_default_color_theme("blue")
+        /* ── 0. TOP DESKTOP MENU BAR ────────────────────────────────────── */
+        .top-menubar {{
+            height: 32px;
+            background-color: rgba(10, 13, 20, 0.95);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid var(--border-glass);
+            display: flex;
+            align-items: center;
+            padding: 0 12px;
+            font-size: 12px;
+            color: var(--text-secondary);
+            position: relative;
+            z-index: 500;
+            flex-shrink: 0;
+        }}
+        .brand-badge {{
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 12px;
+            letter-spacing: 1px;
+            background: linear-gradient(135deg, #60A5FA, #A78BFA);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-right: 14px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+        .menu-btn {{
+            padding: 4px 10px;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            position: relative;
+            transition: all 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+            font-weight: 500;
+        }}
+        .menu-btn:hover, .menu-btn.active {{
+            background-color: rgba(255, 255, 255, 0.08);
+            color: #FFFFFF;
+        }}
 
+        .menu-dropdown {{
+            position: absolute;
+            top: 30px;
+            left: 0;
+            background: rgba(18, 24, 38, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: var(--radius-md);
+            min-width: 230px;
+            padding: 5px;
+            box-shadow: 0 16px 36px rgba(0,0,0,0.65), 0 0 0 1px rgba(255,255,255,0.05);
+            display: none;
+            flex-direction: column;
+            z-index: 1000;
+            animation: menuFade 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+        }}
+        @keyframes menuFade {{
+            from {{ opacity: 0; transform: translateY(-4px) scale(0.98); }}
+            to {{ opacity: 1; transform: translateY(0) scale(1); }}
+        }}
+        .menu-dropdown.show {{ display: flex; }}
+        .menu-item {{
+            padding: 7px 12px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            cursor: pointer;
+            font-size: 12px;
+            color: #E2E8F0;
+            border-radius: var(--radius-sm);
+            transition: all 0.12s ease;
+        }}
+        .menu-item:hover {{
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.85), rgba(37, 99, 235, 0.85));
+            color: #FFFFFF;
+            transform: translateX(2px);
+        }}
+        .menu-sep {{ height: 1px; background: rgba(255, 255, 255, 0.07); margin: 4px 2px; }}
 
-class SimpleToolTip:
-    """A generic tooltip for any widget."""
-    def __init__(self, widget, text):
-        self.widget = widget
-        self.text = text
-        self.tip_window = None
-        self.display_timer = None
+        /* ── APP BODY ────────────────────────────────────────────────────── */
+        .app-body {{
+            flex: 1;
+            display: flex;
+            height: calc(100vh - 32px);
+            overflow: hidden;
+        }}
 
-        self.widget.bind("<Enter>", self.on_enter, add="+")
-        self.widget.bind("<Leave>", self.on_leave, add="+")
-        self.widget.bind("<ButtonPress>", self.on_leave, add="+")
-
-    def on_enter(self, event=None):
-        self._cancel_timer()
-        self.display_timer = self.widget.after(500, self.show_tip)
-
-    def on_leave(self, event=None):
-        self._cancel_timer()
-        self.hide_tip()
-
-    def _cancel_timer(self):
-        if self.display_timer:
-            self.widget.after_cancel(self.display_timer)
-            self.display_timer = None
-
-    def show_tip(self):
-        if self.tip_window:
-            return
-        self.tip_window = tw = tk.Toplevel(self.widget)
-        tw.overrideredirect(True)
-        tw.wm_attributes("-topmost", True)
+        /* ── 1. LEFT SIDEBAR ─────────────────────────────────────────────── */
+        aside {{
+            width: 224px;
+            background: var(--bg-sidebar);
+            backdrop-filter: blur(16px);
+            border-right: 1px solid var(--border-glass);
+            padding: 20px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            flex-shrink: 0;
+            box-shadow: 4px 0 24px rgba(0,0,0,0.25);
+        }}
         
-        x = self.widget.winfo_rootx() + 20
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
-        tw.geometry(f"+{x}+{y}")
+        .profile-card {{
+            background: linear-gradient(135deg, rgba(30, 41, 59, 0.7), rgba(15, 23, 42, 0.8));
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: var(--radius-lg);
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }}
+        .profile-card:hover {{
+            border-color: rgba(99, 102, 241, 0.4);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+        }}
+        .profile-avatar {{
+            width: 36px;
+            height: 36px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #3B82F6, #8B5CF6);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 800;
+            font-size: 15px;
+            color: #FFFFFF;
+            box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+        }}
+        .profile-info {{ display: flex; flex-direction: column; }}
+        .prof-name {{ font-family: 'Outfit', sans-serif; font-size: 15px; font-weight: 700; color: #FFFFFF; letter-spacing: 0.2px; }}
+        .prof-badge {{ font-size: 10px; color: #4ADE80; display: flex; align-items: center; gap: 4px; font-weight: 600; margin-top: 1px; }}
+        .prof-dot {{ width: 6px; height: 6px; border-radius: 50%; background-color: #4ADE80; box-shadow: 0 0 6px #4ADE80; }}
 
-        container = tk.Frame(tw, bg="#1c1c1e", highlightthickness=1, highlightbackground="#333")
-        container.pack(padx=1, pady=1)
+        .divider {{ height: 1px; background: rgba(255, 255, 255, 0.06); margin: 6px 0; }}
 
-        tk.Label(
-            container,
-            text=self.text,
-            bg="#1c1c1e",
-            fg="#aaa",
-            font=("Roboto", 11),
-            justify="left",
-            padx=8,
-            pady=4
-        ).pack()
+        /* Primary Action Buttons */
+        .btn-side-primary1 {{
+            background: linear-gradient(135deg, var(--accent-blue-start), var(--accent-blue-end));
+            color: #FFFFFF; font-size: 13px; font-weight: 700;
+            border-radius: var(--radius-md); padding: 12px 14px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }}
+        .btn-side-primary1:hover {{ filter: brightness(1.15); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(37, 99, 235, 0.5); }}
 
-    def hide_tip(self):
-        if self.tip_window:
-            self.tip_window.destroy()
-            self.tip_window = None
+        .btn-side-primary2 {{
+            background: linear-gradient(135deg, var(--accent-purple-start), var(--accent-purple-end));
+            color: #FFFFFF; font-size: 13px; font-weight: 700;
+            border-radius: var(--radius-md); padding: 12px 14px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 4px 14px rgba(124, 58, 237, 0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }}
+        .btn-side-primary2:hover {{ filter: brightness(1.15); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(124, 58, 237, 0.5); }}
 
+        .btn-side-primary3 {{
+            background: linear-gradient(135deg, var(--accent-emerald-start), var(--accent-emerald-end));
+            color: #FFFFFF; font-size: 13px; font-weight: 700;
+            border-radius: var(--radius-md); padding: 12px 14px; border: none; cursor: pointer; text-align: center;
+            box-shadow: 0 4px 14px rgba(5, 150, 105, 0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }}
+        .btn-side-primary3:hover {{ filter: brightness(1.15); transform: translateY(-2px); box-shadow: 0 6px 20px rgba(5, 150, 105, 0.5); }}
 
-class ExerciseToolTip:
-    """
-    A custom tooltip for exercises that shows strength standards on hover.
-    Includes technical stability fixes: timer management, screen coordinate
-    tracking, and borderless topmost window.
-    """
+        .btn-side-sec {{
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-secondary);
+            font-size: 12px; font-weight: 600;
+            border-radius: var(--radius-md); padding: 9px 12px; border: 1px solid rgba(255, 255, 255, 0.04);
+            cursor: pointer; text-align: left; transition: all 0.15s ease;
+            display: flex; align-items: center; gap: 9px;
+        }}
+        .btn-side-sec:hover {{
+            background: rgba(255, 255, 255, 0.08);
+            color: #FFFFFF;
+            border-color: rgba(255, 255, 255, 0.1);
+            transform: translateX(2px);
+        }}
 
-    def __init__(self, widget, exercise_id, sex, mass=None, lift=None, is_pr=False):
-        self.widget = widget
-        self.exercise_id = exercise_id
-        self.sex = sex
-        self.mass = mass
-        self.lift = lift
-        self.is_pr = is_pr
-        self.tip_window = None
-        self.display_timer = None
-        self.is_expanded = False
+        .side-status-box {{
+            margin-top: auto;
+            background: rgba(15, 23, 42, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: var(--radius-md);
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }}
+        .side-status {{ font-size: 11px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; font-weight: 500; }}
+        .side-last-gen {{ font-size: 10px; color: var(--text-muted); font-family: 'JetBrains Mono', monospace; }}
 
-        self.widget.bind("<Enter>", self.on_enter)
-        self.widget.bind("<Leave>", self.on_leave)
-        self.widget.bind("<Button-1>", self.on_click, add="+")
+        /* ── 2. MAIN DASHBOARD ───────────────────────────────────────────── */
+        main {{
+            flex: 1;
+            padding: 22px 28px;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            overflow-y: auto;
+            background-color: transparent;
+        }}
 
-    def on_enter(self, event=None):
-        self._cancel_timers()
-        self.display_timer = self.widget.after(400, self.show_tip)
+        .main-header {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }}
+        .header-left {{ display: flex; flex-direction: column; gap: 2px; }}
+        .main-title {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 26px;
+            font-weight: 800;
+            color: #FFFFFF;
+            letter-spacing: -0.5px;
+        }}
+        .main-sub {{ font-size: 12px; color: var(--text-muted); }}
 
-    def on_leave(self, event=None):
-        self._cancel_timers()
-        self.hide_tip()
-        self.is_expanded = False
+        .btn-refresh {{
+            background: rgba(255, 255, 255, 0.06);
+            color: #FFFFFF;
+            font-size: 12px; font-weight: 600;
+            border-radius: var(--radius-md); padding: 8px 16px;
+            border: 1px solid rgba(255, 255, 255, 0.1); cursor: pointer;
+            transition: all 0.2s ease; display: flex; align-items: center; gap: 6px;
+            backdrop-filter: blur(10px);
+        }}
+        .btn-refresh:hover {{
+            background: rgba(255, 255, 255, 0.12);
+            border-color: rgba(255, 255, 255, 0.2);
+            transform: translateY(-1px);
+        }}
 
-    def on_click(self, event=None):
-        # Expand on left-click if tip is visible and not already expanded
-        if self.tip_window and not self.is_expanded:
-            self.expand_tip()
+        /* 3 Stats Metric Cards Row */
+        .stats-row {{
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 14px;
+        }}
+        .stat-card {{
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-lg);
+            padding: 16px 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+            overflow: hidden;
+        }}
+        .stat-card::before {{
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, rgba(99, 102, 241, 0.5), transparent);
+            opacity: 0; transition: opacity 0.2s;
+        }}
+        .stat-card:hover {{
+            background: var(--bg-card-hover);
+            border-color: var(--border-glass-hover);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }}
+        .stat-card:hover::before {{ opacity: 1; }}
 
-    def _cancel_timers(self):
-        if self.display_timer:
-            self.widget.after_cancel(self.display_timer)
-            self.display_timer = None
+        .stat-card.clickable {{ cursor: pointer; }}
+        .stat-card.clickable:hover {{
+            border-color: rgba(59, 130, 246, 0.5);
+            box-shadow: 0 8px 24px rgba(37, 99, 235, 0.15);
+        }}
 
-    def show_tip(self):
-        if self.tip_window:
-            return
+        .stat-header {{ display: flex; align-items: center; justify-content: space-between; }}
+        .stat-t {{
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+        }}
+        .stat-icon-badge {{
+            width: 26px;
+            height: 26px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+        }}
+        .stat-v {{
+            font-family: 'Outfit', sans-serif;
+            font-size: 28px;
+            font-weight: 800;
+            color: #FFFFFF;
+            letter-spacing: -0.5px;
+            margin: 2px 0;
+        }}
+        .stat-s {{ font-size: 11px; color: var(--text-secondary); }}
 
-        # Resolved standards
-        from core.standards import get_tiered_standards
+        /* Workout Cards Horizontal Row */
+        .sessions-row {{
+            display: flex;
+            gap: 14px;
+            overflow-x: auto;
+            flex: 1;
+            padding-bottom: 8px;
+        }}
+        .workout-card {{
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: var(--radius-lg);
+            min-width: 275px;
+            flex: 1;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+        }}
+        .workout-card:hover {{
+            background: var(--bg-card-hover);
+            border-color: rgba(255, 255, 255, 0.15);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+        }}
+        .workout-card.pr-card {{
+            background: linear-gradient(180deg, rgba(55, 35, 10, 0.75), rgba(28, 18, 5, 0.85));
+            border-color: rgba(245, 158, 11, 0.4);
+            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.1);
+        }}
+        .workout-card.pr-card:hover {{
+            border-color: rgba(245, 158, 11, 0.7);
+            box-shadow: 0 8px 28px rgba(245, 158, 11, 0.2);
+        }}
 
-        standards = get_tiered_standards(
-            self.exercise_id, self.sex, self.mass if not self.is_expanded else None
-        )
+        .workout-card-hdr {{
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }}
+        .hdr-date {{ font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 700; color: #FFFFFF; }}
+        .hdr-pill {{
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: #93C5FD;
+            font-size: 10px; font-weight: 700;
+            border-radius: 4px; padding: 2px 7px; text-transform: uppercase;
+        }}
+        .workout-card.pr-card .hdr-pill {{
+            background: rgba(245, 158, 11, 0.2);
+            border-color: rgba(245, 158, 11, 0.4);
+            color: #FCD34D;
+        }}
 
-        self.tip_window = tw = tk.Toplevel(self.widget)
-        tw.overrideredirect(True)
-        tw.wm_attributes("-topmost", True)
+        .card-sep {{ height: 1px; background: rgba(255, 255, 255, 0.06); margin: 2px 0 4px 0; }}
+        .workout-card.pr-card .card-sep {{ background: rgba(245, 158, 11, 0.2); }}
 
-        # Calculate position
-        x = self.widget.winfo_rootx() + 20
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
-        tw.geometry(f"+{x}+{y}")
+        .ex-list {{ display: flex; flex-direction: column; gap: 4px; }}
+        .ex-item {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            padding: 5px 8px;
+            border-radius: var(--radius-sm);
+            background: rgba(255, 255, 255, 0.02);
+            transition: all 0.12s ease;
+        }}
+        .ex-item:hover {{
+            background: rgba(255, 255, 255, 0.06);
+        }}
+        .ex-name {{
+            color: #E2E8F0;
+            font-weight: 600;
+            cursor: pointer;
+            transition: color 0.12s;
+        }}
+        .ex-name:hover {{ color: #60A5FA; }}
+        .ex-meta {{
+            color: var(--text-secondary);
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 500;
+            background: rgba(0, 0, 0, 0.25);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+        }}
 
-        # Use a frame with a border to simulate CTk look
-        container = tk.Frame(tw, bg="#1c1c1e", highlightthickness=1, highlightbackground="#333")
-        container.pack(padx=1, pady=1)
+        /* ── 3. HOVER STANDARDS TOOLTIP ──────────────────────────────────── */
+        #standardsTooltip {{
+            position: fixed;
+            background: rgba(18, 24, 38, 0.95);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: var(--radius-md);
+            padding: 12px 14px;
+            box-shadow: 0 16px 36px rgba(0,0,0,0.85);
+            z-index: 2000;
+            display: none;
+            pointer-events: none;
+            max-width: 400px;
+            animation: tipFade 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+        }}
+        @keyframes tipFade {{
+            from {{ opacity: 0; transform: scale(0.97); }}
+            to {{ opacity: 1; transform: scale(1); }}
+        }}
+        #standardsTooltip table {{
+            border-collapse: collapse;
+            font-size: 10px;
+            width: 100%;
+        }}
+        #standardsTooltip th {{
+            background: rgba(255, 255, 255, 0.08);
+            color: #FFFFFF;
+            padding: 5px 7px;
+            font-weight: 700;
+            text-align: center;
+        }}
+        #standardsTooltip td {{
+            padding: 4px 7px;
+            text-align: center;
+            color: #CBD5E1;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-family: 'JetBrains Mono', monospace;
+        }}
+        #standardsTooltip tr.user-mass-row {{
+            background: rgba(37, 99, 235, 0.25);
+            font-weight: 700;
+        }}
+        #standardsTooltip tr.user-mass-row td {{
+            color: #93C5FD;
+        }}
+        #standardsTooltip .achieved {{
+            color: #4ADE80 !important;
+            font-weight: 800;
+        }}
 
-        if not standards:
-            tk.Label(
-                container,
-                text="  Standards not available  ",
-                bg="#1c1c1e",
-                fg="#aaa",
-                font=("Roboto", 11),
-            ).pack(padx=10, pady=5)
-        else:
-            self._render_table(container, standards)
+        /* ── 4. MODALS & DIALOGS ─────────────────────────────────────────── */
+        .modal-overlay {{
+            position: fixed; inset: 0; background: rgba(0, 0, 0, 0.78);
+            backdrop-filter: blur(12px);
+            display: none; align-items: center; justify-content: center; z-index: 1000;
+            opacity: 0; transition: opacity 0.2s ease;
+        }}
+        .modal-overlay.active {{ display: flex; opacity: 1; }}
+        .modal-window {{
+            background: var(--bg-glass-modal);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: var(--radius-xl);
+            width: 900px; max-height: 88vh; display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 24px 60px rgba(0,0,0,0.85);
+            animation: modalPop 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+        }}
+        @keyframes modalPop {{
+            0% {{ transform: scale(0.96) translateY(10px); opacity: 0; }}
+            100% {{ transform: scale(1) translateY(0); opacity: 1; }}
+        }}
 
-    def expand_tip(self):
-        self.is_expanded = True
-        self.hide_tip()
-        self.show_tip()
+        .modal-hdr {{
+            background: rgba(255, 255, 255, 0.03);
+            padding: 18px 24px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+        }}
+        .modal-title {{ font-family: 'Outfit', sans-serif; font-size: 18px; font-weight: 800; color: #FFFFFF; }}
+        .modal-sub {{ font-size: 12px; color: var(--text-secondary); margin-top: 3px; }}
+        .modal-body {{
+            flex: 1; overflow-y: auto; padding: 20px 24px;
+            display: flex; flex-direction: column; gap: 14px;
+        }}
+        .modal-footer {{
+            background: rgba(10, 14, 23, 0.75);
+            padding: 14px 24px;
+            border-top: 1px solid rgba(255, 255, 255, 0.06);
+            display: flex; gap: 12px; align-items: center;
+        }}
 
-    def hide_tip(self):
-        if self.tip_window:
-            self.tip_window.destroy()
-            self.tip_window = None
+        .plan-input {{
+            background: rgba(255, 255, 255, 0.05);
+            color: #FFFFFF; border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: var(--radius-sm); padding: 8px 12px; font-size: 12px; font-weight: 500; outline: none;
+            transition: all 0.15s ease;
+        }}
+        .plan-input:focus {{
+            border-color: #3B82F6; background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }}
 
-    def _render_table(self, container, standards):
-        # We use grid layout with uniform columns to ensure perfect alignment
-        # even with proportional fonts like Roboto.
+        /* Standards & Tables */
+        table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+        th {{
+            color: var(--text-muted); font-weight: 700; text-transform: uppercase; font-size: 11px;
+            letter-spacing: 0.5px; padding: 10px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: left;
+        }}
+        td {{ padding: 9px 8px; border-bottom: 1px solid rgba(255, 255, 255, 0.04); color: #CBD5E1; }}
+        tr:hover {{ background: rgba(255, 255, 255, 0.03); }}
         
-        # Header row
-        header = tk.Frame(container, bg="#252525")
-        header.pack(fill="x")
-        for i in range(6):
-            header.columnconfigure(i, weight=1, uniform="std_col")
+        .badge-slug {{ color: #38BDF8; font-family: 'JetBrains Mono', monospace; font-size: 11px; }}
+        .btn-tool {{
+            background: rgba(255, 255, 255, 0.06); color: #FFFFFF; border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 4px; padding: 4px 10px; font-size: 11px; font-weight: 600; cursor: pointer;
+            transition: all 0.15s;
+        }}
+        .btn-tool:hover {{ background: #3B82F6; border-color: #3B82F6; }}
+    </style>
+</head>
+<body onclick="closeAllMenus(event)">
+    <!-- ── 0. TOP DESKTOP MENU BAR ─────────────────────────────────────── -->
+    <nav class="top-menubar">
+        <div class="brand-badge">⚡ IRON LOG</div>
+        
+        <div class="menu-btn" id="mBtnApp" onclick="toggleMenu('menuApp', event)">
+            App
+            <div class="menu-dropdown" id="menuApp">
+                <div class="menu-item" onclick="openAboutModal()">ℹ️  About Iron Log</div>
+                <div class="menu-item" onclick="triggerUpdateCheck()">🔄  Check for Updates</div>
+                <div class="menu-sep"></div>
+                <div class="menu-item" onclick="openProfileCreator()">👤  New Profile...</div>
+                <div class="menu-item" onclick="openProfilePicker()">👥  Switch User...</div>
+                <div class="menu-sep"></div>
+                <div class="menu-item" onclick="pywebview.api.open_app_data_folder()">📂  Open App Data Folder</div>
+                <div class="menu-sep"></div>
+                <div class="menu-item" onclick="window.close()">❌  Exit</div>
+            </div>
+        </div>
 
-        cols = ["Mass", "Beg", "Nov", "Int", "Adv", "Eli"]
-        for i, c in enumerate(cols):
-            tk.Label(
-                header,
-                text=c,
-                bg="#252525",
-                fg="white",
-                font=("Roboto", 10, "bold"),
-                anchor="center",
-            ).grid(row=0, column=i, padx=4, pady=2, sticky="ew")
+        <div class="menu-btn" id="mBtnSettings" onclick="toggleMenu('menuSettings', event)">
+            Settings
+            <div class="menu-dropdown" id="menuSettings">
+                <div class="menu-item" id="optAutoLogin" onclick="toggleSetting('auto_login')">Auto-Login: Enabled</div>
+                <div class="menu-item" id="optAutoUpdate" onclick="toggleSetting('auto_update')">Auto-Update: Enabled</div>
+                <div class="menu-sep"></div>
+                <div class="menu-item" id="optShowPR" onclick="toggleSetting('show_pr')">Show PRs: ON</div>
+                <div class="menu-item" id="optShowStandards" onclick="toggleSetting('show_standards')">Show Standards: ON</div>
+                <div class="menu-item" id="optShowMilestones" onclick="toggleSetting('show_milestones')">Show Milestones: ON</div>
+            </div>
+        </div>
 
-        # Data rows
-        target_rounded_bm = int(self.mass / 5.0) * 5 if self.mass else -1
+        <div class="menu-btn" id="mBtnProfiles" onclick="toggleMenu('menuProfiles', event)">
+            Profiles
+            <div class="menu-dropdown" id="menuProfiles">
+                <!-- Dynamically injected -->
+            </div>
+        </div>
 
-        for bm, levels in sorted(standards.items()):
-            is_current_mass_row = bm == target_rounded_bm
-            
-            row_bg = "#252525" if is_current_mass_row else "#1c1c1e"
-            row = tk.Frame(container, bg=row_bg)
-            row.pack(fill="x")
-            for i in range(6):
-                row.columnconfigure(i, weight=1, uniform="std_col")
-            
-            row_font = ("Roboto", 10, "bold") if is_current_mass_row else ("Roboto", 10)
+        <div class="menu-btn" id="mBtnExp" onclick="toggleMenu('menuExp', event)">
+            🧪 Experimental
+            <div class="menu-dropdown" id="menuExp">
+                <div class="menu-item" onclick="runBodymassPrefill()">📅  Prefill Mass Dates</div>
+                <div class="menu-item" onclick="openMissingMassesModal()">⚖️  Fill-in Missing Masses</div>
+                <div class="menu-sep"></div>
+                <div class="menu-item" onclick="runValidateSessions()">✅  Validate sessions.py</div>
+            </div>
+        </div>
+    </nav>
 
-            # Mass Column
-            tk.Label(
-                row,
-                text=f"{bm}kg",
-                bg=row_bg,
-                fg="#90caf9",
-                font=row_font,
-                anchor="w",
-            ).grid(row=0, column=0, padx=4, sticky="ew")
-            
-            # Standards columns
-            for i, level in enumerate(["Beginner", "Novice", "Intermediate", "Advanced", "Elite"], 1):
-                val = levels.get(level, "-")
+    <!-- ── APP LAYOUT ──────────────────────────────────────────────────── -->
+    <div class="app-body">
+        <!-- ── 1. LEFT SIDEBAR ─────────────────────────────────────────── -->
+        <aside>
+            <!-- Athlete Profile Pill -->
+            <div class="profile-card" onclick="openProfilePicker()" title="Click to manage or switch athlete profiles">
+                <div class="profile-avatar" id="avatarLetter">R</div>
+                <div class="profile-info">
+                    <div class="prof-name" id="sidebarProfName">Rustem</div>
+                    <div class="prof-badge"><span class="prof-dot"></span> Active Athlete</div>
+                </div>
+            </div>
+
+            <!-- Primary Action Buttons -->
+            <button class="btn-side-primary1" onclick="generateExcel()">
+                <span>🚀</span> Generate Excel Log
+            </button>
+            <button class="btn-side-primary2" onclick="openPlanCycler()">
+                <span>🗓️</span> Plan Next Cycle
+            </button>
+            <button class="btn-side-primary3" onclick="pywebview.api.open_latest_excel()">
+                <span>📂</span> Open Latest Log
+            </button>
+
+            <div class="divider"></div>
+
+            <!-- Secondary Action Buttons -->
+            <button class="btn-side-sec" onclick="pywebview.api.edit_sessions()">
+                <span>📝</span> Edit Sessions
+            </button>
+            <button class="btn-side-sec" onclick="pywebview.api.open_output()">
+                <span>📊</span> Output Folder
+            </button>
+            <button class="btn-side-sec" onclick="openStandardsModal()">
+                <span>📚</span> Exercise Library
+            </button>
+            <button class="btn-side-sec" onclick="runScraper()">
+                <span>⚡</span> Run Scraper
+            </button>
+
+            <!-- Bottom Status Indicator -->
+            <div class="side-status-box">
+                <div class="side-status" id="sidebarStatus">● System Ready</div>
+                <div class="side-last-gen" id="sidebarLastGen"></div>
+            </div>
+        </aside>
+
+        <!-- ── 2. MAIN CONTENT AREA ────────────────────────────────────── -->
+        <main>
+            <div class="main-header">
+                <div class="header-left">
+                    <div class="main-title">Recent Sessions</div>
+                    <div class="main-sub">Training progression overview & strength trajectory</div>
+                </div>
+                <button class="btn-refresh" onclick="loadDashboard()">
+                    <span>↻</span> Refresh
+                </button>
+            </div>
+
+            <!-- 3 Stats Metric Cards -->
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-t">Gym Attendance</div>
+                        <div class="stat-icon-badge" style="background: rgba(37, 99, 235, 0.2); color: #60A5FA;">🔥</div>
+                    </div>
+                    <div class="stat-v" id="c1Val">-- Days</div>
+                    <div class="stat-s" id="c1Sub">-- this year · -- this month</div>
+                </div>
+
+                <div class="stat-card clickable" onclick="openSplitModal()" title="Click to view full training split routine & history">
+                    <div class="stat-header">
+                        <div class="stat-t">Current Split Duration</div>
+                        <div class="stat-icon-badge" style="background: rgba(124, 58, 237, 0.2); color: #C084FC;">⚡</div>
+                    </div>
+                    <div class="stat-v" id="c2Val">-- Weeks</div>
+                    <div class="stat-s" id="c2Sub">N-Day Split · started --</div>
+                </div>
+
+                <div class="stat-card">
+                    <div class="stat-header">
+                        <div class="stat-t">Last Workout</div>
+                        <div class="stat-icon-badge" style="background: rgba(245, 158, 11, 0.2); color: #FBBF24;">🏆</div>
+                    </div>
+                    <div class="stat-v" id="c3Val">--</div>
+                    <div class="stat-s" id="c3Sub">Day --</div>
+                </div>
+            </div>
+
+            <!-- Recent Sessions Horizontal Cards -->
+            <div class="sessions-row" id="sessionsGrid">
+                <div style="color: var(--text-muted); font-size: 13px;">Loading workout sessions...</div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ── 3. HOVER STANDARDS TOOLTIP ──────────────────────────────────── -->
+    <div id="standardsTooltip"></div>
+
+    <!-- ── 4. STRENGTH STANDARDS MODAL ─────────────────────────────────── -->
+    <div id="modalStandards" class="modal-overlay">
+        <div class="modal-window" style="width: 880px;">
+            <div class="modal-hdr">
+                <div class="modal-title">Strength Standards Library</div>
+                <div class="modal-sub">Browse benchmark lift targets for all 280+ strength exercises</div>
+                <div style="margin-top: 12px; display: flex; gap: 8px;">
+                    <input type="text" id="stdSearchInput" class="plan-input" placeholder="🔍  Search exercises by name or slug in real-time..." style="flex: 1;" oninput="filterStandards(this.value)">
+                </div>
+            </div>
+            <div class="modal-body" style="max-height: 65vh;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Exercise Name</th><th>Slug</th><th>Beg</th><th>Nov</th><th>Int</th><th>Adv</th><th>Eli</th><th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="stdTbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-tool" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalStandards')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── 5. SPLIT DETAILS MODAL ──────────────────────────────────────── -->
+    <div id="modalSplit" class="modal-overlay">
+        <div class="modal-window" style="width: 660px;">
+            <div class="modal-hdr">
+                <div class="modal-title">Current Split Details & History</div>
+                <div class="modal-sub">Overview of your current split cycle breakdown</div>
+            </div>
+            <div class="modal-body">
+                <div class="stat-card" style="background: rgba(30, 41, 59, 0.5);">
+                    <div class="stat-t">Current Routine</div>
+                    <div id="splitOverview" style="font-size: 13px; margin-top: 6px; line-height: 1.6;"></div>
+                </div>
+                <div style="font-weight: 700; font-size: 13px; margin-top: 6px; color: var(--text-secondary);">Split Session Logs:</div>
+                <table>
+                    <thead>
+                        <tr><th>Date</th><th>Day</th><th>Exercises</th></tr>
+                    </thead>
+                    <tbody id="splitTbody"></tbody>
+                </table>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-tool" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalSplit')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── 6. ABOUT DIALOG MODAL ───────────────────────────────────────── -->
+    <div id="modalAbout" class="modal-overlay">
+        <div class="modal-window" style="width: 400px;">
+            <div class="modal-hdr" style="text-align: center;">
+                <div class="modal-title">Iron Log</div>
+                <div class="modal-sub" id="aboutVerText">Version {__version__}</div>
+            </div>
+            <div class="modal-body" style="text-align: center; gap: 10px; padding: 24px 20px;">
+                <div style="font-size: 14px; color: var(--text-secondary);">Designed & built by Rustem Nizamov</div>
+                <div style="font-size: 12px; color: var(--text-muted);">High-Performance Local Strength & Progressive Overload Suite</div>
+                <button class="btn-side-sec" style="margin: 14px auto 0 auto; justify-content: center; width: 190px;" onclick="pywebview.api.open_url('https://github.com/Rusya665/iron-log')">GitHub Repository ↗</button>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-tool" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalAbout')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── 7. PROFILE PICKER MODAL ─────────────────────────────────────── -->
+    <div id="modalProfilePicker" class="modal-overlay">
+        <div class="modal-window" style="width: 540px;">
+            <div class="modal-hdr">
+                <div class="modal-title">Select Your Profile</div>
+                <div class="modal-sub">Switch active athlete account</div>
+            </div>
+            <div class="modal-body">
+                <div id="profilePickerList" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px;"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-side-primary2" style="padding: 8px 14px;" onclick="openProfileCreator()">+ New Profile</button>
+                <button class="btn-tool" style="padding: 8px 18px; margin-left: auto;" onclick="closeModal('modalProfilePicker')">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── 8. PROFILE CREATOR / EDITOR MODAL ────────────────────────────── -->
+    <div id="modalProfileCreator" class="modal-overlay">
+        <div class="modal-window" style="width: 500px;">
+            <div class="modal-hdr">
+                <div class="modal-title" id="profModalTitle">Create Profile</div>
+            </div>
+            <div class="modal-body" style="gap: 12px;">
+                <input type="hidden" id="profEditIndex" value="-1">
+                <div>
+                    <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Name:</label>
+                    <input type="text" id="profNameInput" class="plan-input" style="width: 100%;" placeholder="e.g. Rustem">
+                </div>
+                <div>
+                    <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Sex:</label>
+                    <div style="display: flex; gap: 20px; font-size: 13px;">
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="radio" name="profSex" value="male" id="sexMale" checked> Male
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+                            <input type="radio" name="profSex" value="female" id="sexFemale"> Female
+                        </label>
+                    </div>
+                </div>
+                <div>
+                    <label style="font-size: 12px; color: var(--text-secondary); display: block; margin-bottom: 4px;">Data Folder (sessions.py location):</label>
+                    <div style="display: flex; gap: 8px;">
+                        <input type="text" id="profDirInput" class="plan-input" style="flex: 1;" placeholder="C:/path/to/folder">
+                        <button class="btn-tool" onclick="browseFolder()">Browse...</button>
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">Each user needs their own folder. Excel logs will be saved in a 'gym' subfolder.</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-tool" style="padding: 8px 16px;" onclick="closeModal('modalProfileCreator')">Cancel</button>
+                <button class="btn-side-primary3" style="padding: 8px 18px; margin-left: auto;" onclick="saveProfileForm()">Save Profile</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ── 9. FILL-IN MISSING MASSES MODAL ────────────────────────────── -->
+    <div id="modalMissingMasses" class="modal-overlay">
+        <div class="modal-window" style="width: 440px;">
+            <div class="modal-hdr">
+                <div class="modal-title">Fill-in Missing Masses</div>
+                <div class="modal-sub">Enter body mass values for workout dates where mass is None.</div>
+            </div>
+            <div class="modal-body" id="missingMassesContainer" style="max-height: 50vh;"></div>
+            <div class="modal-footer">
+                <button class="btn-tool" style="padding: 8px 16px;" onclick="closeModal('modalMissingMasses')">Cancel</button>
+                <button class="btn-side-primary3" style="padding: 8px 18px; margin-left: auto;" onclick="saveMissingMasses()">💾 Save Mass Values</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let cachedStats = {{}};
+        let activeMenu = null;
+
+        function toggleMenu(menuId, e) {{
+            if (e) e.stopPropagation();
+            const el = document.getElementById(menuId);
+            const isShow = el.classList.contains("show");
+            closeAllMenus();
+            if (!isShow) {{
+                el.classList.add("show");
+                activeMenu = menuId;
+            }}
+        }}
+
+        function closeAllMenus() {{
+            document.querySelectorAll(".menu-dropdown").forEach(d => d.classList.remove("show"));
+            activeMenu = null;
+        }}
+
+        function closeModal(id) {{
+            document.getElementById(id).classList.remove("active");
+        }}
+
+        function openModal(id) {{
+            document.getElementById(id).classList.add("active");
+        }}
+
+        async function init() {{
+            try {{
+                await loadDashboard();
+                await updateMenuState();
+            }} catch (err) {{
+                console.error("Init Error:", err);
+                document.getElementById("sidebarStatus").innerText = "● Init Error: " + err;
+            }}
+        }}
+
+        async function updateMenuState() {{
+            if (!window.pywebview || !window.pywebview.api) return;
+            const settings = await pywebview.api.get_settings();
+            document.getElementById("optAutoLogin").innerText = "Auto-Login: " + (settings.auto_login ? "Enabled" : "Disabled");
+            document.getElementById("optAutoUpdate").innerText = "Auto-Update: " + (settings.auto_update ? "Enabled" : "Disabled");
+            document.getElementById("optShowPR").innerText = "Show PRs: " + (settings.show_pr ? "ON" : "OFF");
+            document.getElementById("optShowStandards").innerText = "Show Standards: " + (settings.show_standards ? "ON" : "OFF");
+            document.getElementById("optShowMilestones").innerText = "Show Milestones: " + (settings.show_milestones ? "ON" : "OFF");
+
+            // Populate Profiles Menu
+            const pData = await pywebview.api.get_profiles();
+            const profMenu = document.getElementById("menuProfiles");
+            profMenu.innerHTML = "";
+            (pData.profiles || []).forEach((p, idx) => {{
+                const isActive = idx === pData.active_index;
+                const item = document.createElement("div");
+                item.className = "menu-item";
+                item.style.fontWeight = isActive ? "700" : "500";
+                item.innerHTML = `<span>${{isActive ? '✓ ' : ''}}${{p.name}}</span><span style="font-size: 10px; color: var(--text-muted);">Select</span>`;
+                item.onclick = async (e) => {{
+                    e.stopPropagation();
+                    closeAllMenus();
+                    await pywebview.api.select_profile(idx);
+                    await loadDashboard();
+                    await updateMenuState();
+                }};
+                profMenu.appendChild(item);
+            }});
+            profMenu.innerHTML += '<div class="menu-sep"></div><div class="menu-item" onclick="openProfilePicker()">👥  Manage Profiles...</div>';
+        }}
+
+        async function toggleSetting(settingName) {{
+            await pywebview.api.toggle_setting(settingName);
+            await updateMenuState();
+        }}
+
+        async function loadDashboard() {{
+            if (!window.pywebview || !window.pywebview.api) return;
+            document.getElementById("sidebarStatus").innerText = "● Loading...";
+            const data = await pywebview.api.get_active_data();
+            if (!data.success) {{
+                document.getElementById("sidebarStatus").innerText = "● " + data.error;
+                return;
+            }}
+            document.getElementById("sidebarProfName").innerText = data.profile_name;
+            document.getElementById("avatarLetter").innerText = (data.profile_name || "U").charAt(0).toUpperCase();
+            const s = data.stats;
+            cachedStats = s;
+
+            // Stats Cards
+            document.getElementById("c1Val").innerText = (s.total_days || 0) + " Days";
+            document.getElementById("c1Sub").innerText = (s.this_year_days || 0) + " this year · " + (s.this_month_days || 0) + " this month";
+
+            document.getElementById("c2Val").innerText = (s.current_split_weeks || 0).toFixed(1) + " Wks";
+            document.getElementById("c2Sub").innerText = (s.cycle_length || "N/A") + "-Day Split · started " + (s.current_split_start || "N/A");
+
+            document.getElementById("c3Val").innerText = s.latest_workout_date || "N/A";
+            document.getElementById("c3Sub").innerText = "Day " + (s.latest_workout_day || "N/A") + " Completed";
+
+            // Workout Cards
+            const grid = document.getElementById("sessionsGrid");
+            grid.innerHTML = "";
+            (data.sessions || []).forEach(sess => {{
+                const isPR = typeof sess.day === 'string' && sess.day.toUpperCase() === 'PR';
+                const card = document.createElement("div");
+                card.className = "workout-card" + (isPR ? " pr-card" : "");
                 
-                # Check achievement for PR sessions
-                achieved = False
-                if self.is_pr and self.lift and isinstance(val, (int, float)):
-                    if self.lift >= val:
-                        achieved = True
+                let exsHtml = "";
+                sess.exercises.forEach(ex => {{
+                    exsHtml += `
+                        <div class="ex-item">
+                            <span class="ex-name" onmouseenter="showTooltip(event, '${{ex.id}}', ${{sess.mass || 0}}, ${{ex.max_lift || 0}}, ${{isPR}})" onmouseleave="hideTooltip()">${{ex.name}}</span>
+                            <span class="ex-meta">${{ex.summary}}</span>
+                        </div>
+                    `;
+                }});
                 
-                text_color = "#4ade80" if achieved else "#dddddd"
-                cell_font = ("Roboto", 10, "bold") if (achieved or is_current_mass_row) else ("Roboto", 10)
+                const dayLabel = typeof sess.day === 'number' ? `Day ${{sess.day}}` : `${{sess.day}}`;
+                card.innerHTML = `
+                    <div class="workout-card-hdr">
+                        <span class="hdr-date">📅  ${{sess.date}}</span>
+                        <span class="hdr-pill">${{dayLabel}}</span>
+                    </div>
+                    <div class="card-sep"></div>
+                    <div class="ex-list">${{exsHtml}}</div>
+                `;
+                grid.appendChild(card);
+            }});
+
+            document.getElementById("sidebarStatus").innerText = "● System Ready";
+        }}
+
+        /* ── Hover Standards Tooltip ──────────────────────────────────────── */
+        let tooltipTimer = null;
+        async function showTooltip(e, exId, userMass, userLift, isPR) {{
+            clearTimeout(tooltipTimer);
+            const x = e.clientX + 14;
+            const y = e.clientY + 14;
+            
+            tooltipTimer = setTimeout(async () => {{
+                const tableData = await pywebview.api.get_exercise_standards_table(exId);
+                const tip = document.getElementById("standardsTooltip");
                 
-                tk.Label(
-                    row,
-                    text=str(val),
-                    bg=row_bg,
-                    fg=text_color,
-                    font=cell_font,
-                    anchor="center",
-                ).grid(row=0, column=i, padx=4, sticky="ew")
+                if (!tableData || !tableData.standards || Object.keys(tableData.standards).length === 0) {{
+                    tip.innerHTML = `<div style="font-size: 11px; color: var(--text-secondary);">Standards not available for ${{tableData.name || exId}}</div>`;
+                }} else {{
+                    let rowsHtml = "";
+                    const targetBm = tableData.target_bm;
+                    
+                    for (const [bm, levels] of Object.entries(tableData.standards)) {{
+                        const isUserBm = parseInt(bm) === targetBm;
+                        let cells = `<td>${{bm}}kg</td>`;
+                        for (const lvl of ["Beginner", "Novice", "Intermediate", "Advanced", "Elite"]) {{
+                            const val = levels[lvl] || "-";
+                            const achieved = isPR && typeof val === 'number' && userLift >= val;
+                            cells += `<td class="${{achieved ? 'achieved' : ''}}">${{val}}</td>`;
+                        }}
+                        rowsHtml += `<tr class="${{isUserBm ? 'user-mass-row' : ''}}">${{cells}}</tr>`;
+                    }}
+
+                    tip.innerHTML = `
+                        <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px; color: #FFF; font-family: 'Outfit', sans-serif;">${{tableData.name}} Standards</div>
+                        <table>
+                            <thead><tr><th>Mass</th><th>Beg</th><th>Nov</th><th>Int</th><th>Adv</th><th>Eli</th></tr></thead>
+                            <tbody>${{rowsHtml}}</tbody>
+                        </table>
+                    `;
+                }}
+                
+                tip.style.left = Math.min(x, window.innerWidth - 410) + "px";
+                tip.style.top = Math.min(y, window.innerHeight - 260) + "px";
+                tip.style.display = "block";
+            }}, 220);
+        }}
+
+        function hideTooltip() {{
+            clearTimeout(tooltipTimer);
+            document.getElementById("standardsTooltip").style.display = "none";
+        }}
+
+        /* ── Actions & Dialogs ────────────────────────────────────────────── */
+        async function generateExcel() {{
+            document.getElementById("sidebarStatus").innerText = "● Generating Log...";
+            const res = await pywebview.api.generate_excel();
+            if (res.success) {{
+                document.getElementById("sidebarStatus").innerText = "✅ Generated Log";
+                document.getElementById("sidebarLastGen").innerText = "Last gen: " + res.time;
+            }} else {{
+                document.getElementById("sidebarStatus").innerText = "❌ " + res.error;
+                alert("Generation Error: " + res.error);
+            }}
+        }}
+
+        async function openPlanCycler() {{
+            document.getElementById("sidebarStatus").innerText = "● Opening Planner...";
+            await pywebview.api.open_planner_window();
+            document.getElementById("sidebarStatus").innerText = "● System Ready";
+        }}
+
+        async function runScraper() {{
+            document.getElementById("sidebarStatus").innerText = "● Running scraper...";
+            const res = await pywebview.api.run_scraper();
+            if (res.success) {{
+                document.getElementById("sidebarStatus").innerText = "● Scraper active";
+            }} else {{
+                document.getElementById("sidebarStatus").innerText = "● Scraper error: " + res.error;
+            }}
+        }}
+
+        async function triggerUpdateCheck() {{
+            document.getElementById("sidebarStatus").innerText = "● Checking updates...";
+            const res = await pywebview.api.check_updates();
+            if (res.has_update) {{
+                if (confirm(`A new version (${{res.version}}) is available!\\nDo you want to open the download page?`)) {{
+                    pywebview.api.open_url(res.url);
+                }}
+            }} else {{
+                alert(`You are on the latest version (v${{res.current}}).`);
+            }}
+            document.getElementById("sidebarStatus").innerText = "● System Ready";
+        }}
+
+        async function runValidateSessions() {{
+            document.getElementById("sidebarStatus").innerText = "● Validating...";
+            const res = await pywebview.api.run_validate_sessions();
+            if (res.success) {{
+                let msg = "✅ " + res.message;
+                if (res.none_mass_dates && res.none_mass_dates.length > 0) {{
+                    msg += `\\n\\n⚠️ ${{res.none_mass_dates.length}} BODYMASS_LOG entries still have mass=None:\\n` + res.none_mass_dates.map(d => "  • " + d).join("\\n");
+                    msg += "\\n\\nUse 🧪 Experimental → Fill-in Missing Masses to complete them.";
+                }}
+                alert(msg);
+                document.getElementById("sidebarStatus").innerText = "✅ Validated";
+            }} else {{
+                alert("❌ " + res.error);
+                document.getElementById("sidebarStatus").innerText = "❌ Validation failed";
+            }}
+        }}
+
+        async function runBodymassPrefill() {{
+            document.getElementById("sidebarStatus").innerText = "● Prefilling...";
+            const res = await pywebview.api.run_bodymass_prefill();
+            if (res.success) {{
+                if (res.count === 0) {{
+                    alert("All workout dates are already present in BODYMASS_LOG. Nothing to add.");
+                }} else {{
+                    alert(`✅ Added ${{res.count}} date(s) to BODYMASS_LOG with mass=None in sessions.py.`);
+                }}
+                document.getElementById("sidebarStatus").innerText = "● System Ready";
+            }} else {{
+                alert("Prefill Error: " + res.error);
+            }}
+        }}
+
+        async function openMissingMassesModal() {{
+            const res = await pywebview.api.get_missing_masses();
+            if (!res.success) {{
+                alert("Error: " + res.error);
+                return;
+            }}
+            if (!res.entries || res.entries.length === 0) {{
+                alert("All Done: No missing mass entries in BODYMASS_LOG! 🎉");
+                return;
+            }}
+            const container = document.getElementById("missingMassesContainer");
+            container.innerHTML = "";
+            res.entries.forEach(d => {{
+                const row = document.createElement("div");
+                row.style.cssText = "display: flex; align-items: center; gap: 10px; margin-bottom: 8px;";
+                row.innerHTML = `
+                    <span style="font-size: 13px; width: 110px; font-family: 'JetBrains Mono', monospace;">${{d}}</span>
+                    <input type="number" step="0.1" class="plan-input missing-mass-input" data-date="${{d}}" placeholder="e.g. 83.5" style="flex: 1;">
+                    <span style="color: var(--text-secondary); font-size: 12px;">kg</span>
+                `;
+                container.appendChild(row);
+            }});
+            openModal("modalMissingMasses");
+        }}
+
+        async function saveMissingMasses() {{
+            const inputs = document.querySelectorAll(".missing-mass-input");
+            const updates = {{}};
+            inputs.forEach(inp => {{
+                const v = parseFloat(inp.value);
+                if (!isNaN(v) && v > 0) {{
+                    updates[inp.dataset.date] = v;
+                }}
+            }});
+            if (Object.keys(updates).length === 0) {{
+                alert("No mass values were entered.");
+                return;
+            }}
+            const res = await pywebview.api.save_missing_masses(updates);
+            if (res.success) {{
+                alert(`✅ Updated ${{res.count}} mass value(s) in sessions.py.`);
+                closeModal("modalMissingMasses");
+                await loadDashboard();
+            }} else {{
+                alert("Error saving masses: " + res.error);
+            }}
+        }}
+
+        function openAboutModal() {{
+            openModal("modalAbout");
+        }}
+
+        /* ── Profile Modals ───────────────────────────────────────────────── */
+        async function openProfilePicker() {{
+            const data = await pywebview.api.get_profiles();
+            const list = document.getElementById("profilePickerList");
+            list.innerHTML = "";
+            (data.profiles || []).forEach((p, idx) => {{
+                const isAct = idx === data.active_index;
+                const card = document.createElement("div");
+                card.className = "stat-card clickable";
+                card.style.borderColor = isAct ? "rgba(59, 130, 246, 0.6)" : "var(--border-glass)";
+                card.innerHTML = `
+                    <div style="font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 16px; color: ${{isAct ? '#60A5FA' : '#FFF'}};">${{p.name}}</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">${{p.sessions_dir}}</div>
+                    <div style="display: flex; gap: 6px; margin-top: 10px;">
+                        <button class="btn-tool" onclick="selectProf(${{idx}})">Select</button>
+                        <button class="btn-tool" onclick="editProf(${{idx}})">Edit</button>
+                        <button class="btn-tool" style="color: #F87171;" onclick="deleteProf(${{idx}}, '${{p.name}}')">Delete</button>
+                    </div>
+                `;
+                list.appendChild(card);
+            }});
+            openModal("modalProfilePicker");
+        }}
+
+        async function selectProf(idx) {{
+            await pywebview.api.select_profile(idx);
+            closeModal("modalProfilePicker");
+            await loadDashboard();
+            await updateMenuState();
+        }}
+
+        async function editProf(idx) {{
+            const data = await pywebview.api.get_profiles();
+            const p = data.profiles[idx];
+            document.getElementById("profModalTitle").innerText = "Edit Profile";
+            document.getElementById("profEditIndex").value = idx;
+            document.getElementById("profNameInput").value = p.name;
+            document.getElementById("profDirInput").value = p.sessions_dir;
+            if (p.sex === "female") document.getElementById("sexFemale").checked = true;
+            else document.getElementById("sexMale").checked = true;
+            closeModal("modalProfilePicker");
+            openModal("modalProfileCreator");
+        }}
+
+        async function deleteProf(idx, name) {{
+            if (confirm(`Are you sure you want to delete profile '${{name}}'?`)) {{
+                await pywebview.api.delete_profile(idx);
+                await openProfilePicker();
+                await updateMenuState();
+            }}
+        }}
+
+        function openProfileCreator() {{
+            document.getElementById("profModalTitle").innerText = "Create New Profile";
+            document.getElementById("profEditIndex").value = -1;
+            document.getElementById("profNameInput").value = "";
+            document.getElementById("profDirInput").value = "";
+            document.getElementById("sexMale").checked = true;
+            openModal("modalProfileCreator");
+        }}
+
+        async function browseFolder() {{
+            const path = await pywebview.api.browse_folder();
+            if (path) {{
+                document.getElementById("profDirInput").value = path;
+            }}
+        }}
+
+        async function saveProfileForm() {{
+            const idx = parseInt(document.getElementById("profEditIndex").value);
+            const isEdit = idx >= 0;
+            const pData = {{
+                name: document.getElementById("profNameInput").value.trim(),
+                sessions_dir: document.getElementById("profDirInput").value.trim(),
+                sex: document.getElementById("sexFemale").checked ? "female" : "male"
+            }};
+            const res = await pywebview.api.save_profile(pData, isEdit, idx);
+            if (res.success) {{
+                closeModal("modalProfileCreator");
+                await loadDashboard();
+                await updateMenuState();
+            }} else {{
+                alert("Error: " + res.error);
+            }}
+        }}
+
+        /* ── Standards & Split ───────────────────────────────────────────── */
+        async function openStandardsModal() {{
+            await filterStandards("");
+            openModal("modalStandards");
+        }}
+        
+        async function filterStandards(query) {{
+            const list = await pywebview.api.search_standards(query);
+            const tbody = document.getElementById("stdTbody");
+            tbody.innerHTML = "";
+            (list || []).forEach(item => {{
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td style="font-weight: 600;">${{item.name}}</td>
+                    <td><span class="badge-slug">${{item.slug}}</span></td>
+                    <td>${{item.beg}}</td><td>${{item.nov}}</td><td>${{item.int}}</td><td>${{item.adv}}</td><td>${{item.eli}}</td>
+                    <td style="display: flex; gap: 4px;">
+                        <button class="btn-tool" onclick="pywebview.api.copy_clipboard('${{item.slug}}')">Copy</button>
+                        <button class="btn-tool" onclick="pywebview.api.copy_clipboard('${{item.slug.replace(/-/g, '_')}} = \\'${{item.slug}}\\'')">Copy Py</button>
+                        <button class="btn-tool" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${{item.slug}}')">View ↗</button>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            }});
+        }}
+
+        function openSplitModal() {{
+            const s = cachedStats;
+            const daysEx = s.split_days_exercises || {{}};
+            let routineHtml = "";
+            for (const [dNum, exs] of Object.entries(daysEx)) {{
+                routineHtml += `<div style="margin-bottom: 6px;"><strong style="color: #60A5FA;">Day ${{dNum}}:</strong> ${{exs.join(", ")}}</div>`;
+            }}
+            document.getElementById("splitOverview").innerHTML = routineHtml || "<div>Routine information loading...</div>";
+
+            const tbody = document.getElementById("splitTbody");
+            tbody.innerHTML = "";
+            (s.split_sessions_details || []).forEach(sess => {{
+                const tr = document.createElement("tr");
+                tr.innerHTML = `
+                    <td style="font-family: 'JetBrains Mono', monospace;">${{sess.date_str}}</td>
+                    <td><span class="badge-slug">Day ${{sess.day}}</span></td>
+                    <td>${{(sess.exercises || []).join(", ")}}</td>
+                `;
+                tbody.appendChild(tr);
+            }});
+            openModal("modalSplit");
+        }}
+
+        // Robust App Initializer
+        function startApp() {{
+            if (window.pywebview && window.pywebview.api) {{
+                init();
+            }} else {{
+                window.addEventListener('pywebviewready', init);
+                let attempts = 0;
+                const timer = setInterval(() => {{
+                    attempts++;
+                    if (window.pywebview && window.pywebview.api) {{
+                        clearInterval(timer);
+                        init();
+                    }} else if (attempts > 30) {{
+                        clearInterval(timer);
+                    }}
+                }}, 100);
+            }}
+        }}
+
+        if (document.readyState === 'loading') {{
+            document.addEventListener('DOMContentLoaded', startApp);
+        }} else {{
+            startApp();
+        }}
+    </script>
+</body>
+</html>
+"""
 
 
-class IronLogApp(ctk.CTk):
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. STANDALONE PLANNER WINDOW HTML TEMPLATE
+# ─────────────────────────────────────────────────────────────────────────────
+PLANNER_HTML_TEMPLATE = r"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iron Log - Plan Next Cycle</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;600&family=Outfit:wght@500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --bg-app: #0A0D14;
+            --bg-card: rgba(18, 24, 38, 0.75);
+            --border-glass: rgba(255, 255, 255, 0.08);
+            --text-primary: #FFFFFF;
+            --text-secondary: #94A3B8;
+            --text-muted: #64748B;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        body {
+            background-color: var(--bg-app);
+            color: var(--text-primary);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            user-select: none;
+            background-image: 
+                radial-gradient(circle at 20% 15%, rgba(124, 58, 237, 0.08) 0%, transparent 40%),
+                radial-gradient(circle at 80% 85%, rgba(37, 99, 235, 0.08) 0%, transparent 40%);
+        }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 7px; height: 7px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.14); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.28); }
+
+        header {
+            background: rgba(15, 20, 32, 0.95);
+            backdrop-filter: blur(16px);
+            border-bottom: 1px solid var(--border-glass);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .header-title {
+            font-family: 'Outfit', sans-serif;
+            font-size: 20px;
+            font-weight: 800;
+            color: #FFFFFF;
+            letter-spacing: -0.3px;
+        }
+        .header-sub { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+
+        main {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        footer {
+            background: rgba(10, 14, 23, 0.9);
+            backdrop-filter: blur(16px);
+            border-top: 1px solid var(--border-glass);
+            padding: 14px 24px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        /* Cycler Day Box */
+        .plan-day-card {
+            background: var(--bg-card);
+            backdrop-filter: blur(16px);
+            border: 1px solid var(--border-glass);
+            border-radius: 12px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+        }
+        .plan-day-hdr {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 8px;
+            padding: 8px 14px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .day-pill {
+            background: linear-gradient(135deg, #00897B, #004D40);
+            color: white; font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 12px;
+            border-radius: 5px; padding: 4px 12px; letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(0, 137, 123, 0.3);
+        }
+        .date-label { font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+
+        .plan-input {
+            background: rgba(255, 255, 255, 0.05);
+            color: #FFFFFF; border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 6px; padding: 7px 10px; font-size: 12px; font-weight: 500; outline: none;
+            transition: all 0.15s ease;
+        }
+        .plan-input:focus {
+            border-color: #3B82F6; background: rgba(255, 255, 255, 0.08);
+            box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+        }
+        .plan-input.center { text-align: center; }
+
+        .plan-row-grid {
+            display: grid;
+            grid-template-columns: 55px 1fr 60px 105px 115px 1fr 140px;
+            gap: 8px;
+            align-items: center;
+        }
+        .plan-col-head {
+            font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;
+            letter-spacing: 0.5px; padding: 0 4px;
+        }
+        .plan-item-row {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            border-radius: 6px; padding: 6px 8px; transition: all 0.15s;
+        }
+        .plan-item-row:hover {
+            background: rgba(255, 255, 255, 0.05);
+            border-color: rgba(255, 255, 255, 0.08);
+        }
+
+        .order-btn-group { display: flex; gap: 2px; }
+        .btn-arrow {
+            background: rgba(255, 255, 255, 0.05); color: #AAA; border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 4px; width: 24px; height: 26px; cursor: pointer; font-size: 10px;
+            display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+        }
+        .btn-arrow:hover { background: #3B82F6; color: #FFF; border-color: #3B82F6; }
+
+        .btn-pill-inc {
+            background: rgba(34, 197, 94, 0.15); color: #4ADE80; border: 1px solid rgba(34, 197, 94, 0.3);
+            border-radius: 5px; padding: 4px 6px; font-size: 10px; font-weight: 700; cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-pill-inc:hover { background: #22C55E; color: #000; }
+        
+        .btn-pill-rep {
+            background: rgba(192, 132, 252, 0.15); color: #C084FC; border: 1px solid rgba(192, 132, 252, 0.3);
+            border-radius: 5px; padding: 4px 6px; font-size: 10px; font-weight: 700; cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-pill-rep:hover { background: #A855F7; color: #000; }
+
+        .btn-trash {
+            background: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 5px; width: 26px; height: 26px; cursor: pointer; font-size: 11px;
+            display: flex; align-items: center; justify-content: center; transition: all 0.15s;
+        }
+        .btn-trash:hover { background: #EF4444; color: #FFF; }
+
+        .btn-add-ex {
+            background: linear-gradient(135deg, #0288D1, #01579B);
+            color: white; font-weight: 700; font-size: 12px; border: none;
+            border-radius: 6px; padding: 6px 14px; cursor: pointer; transition: all 0.15s;
+        }
+        .btn-add-ex:hover { filter: brightness(1.15); }
+
+        .btn-del-day {
+            background: rgba(220, 38, 38, 0.15); color: #FCA5A5; border: 1px solid rgba(220, 38, 38, 0.3);
+            border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+        }
+        .btn-del-day:hover { background: #DC2626; color: #FFF; }
+
+        .btn-save-plan {
+            background: linear-gradient(135deg, #059669, #10B981);
+            color: white; font-family: 'Outfit', sans-serif; font-weight: 800; font-size: 13px; border: none;
+            border-radius: 8px; padding: 11px 24px; cursor: pointer; margin-left: auto;
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.35); transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .btn-save-plan:hover { filter: brightness(1.15); transform: translateY(-1px); box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5); }
+
+        .btn-sec {
+            background: rgba(255, 255, 255, 0.05); color: var(--text-secondary); font-size: 12px; font-weight: 700;
+            border-radius: 8px; padding: 10px 18px; border: 1px solid rgba(255, 255, 255, 0.08); cursor: pointer;
+            transition: all 0.15s;
+        }
+        .btn-sec:hover { background: rgba(255, 255, 255, 0.1); color: #FFF; }
+
+        .btn-primary2 {
+            background: linear-gradient(135deg, #7C3AED, #C026D3);
+            color: #FFFFFF; font-size: 12px; font-weight: 700;
+            border-radius: 8px; padding: 10px 18px; border: none; cursor: pointer;
+            box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3); transition: all 0.15s;
+        }
+        .btn-primary2:hover { filter: brightness(1.15); }
+    </style>
+</head>
+<body>
+    <header>
+        <div>
+            <div class="header-title" id="cyclerTitle">Plan Next Cycle</div>
+            <div class="header-sub">Configure your training split. Type exercise variable name, sets, reps, mass, and notes.</div>
+        </div>
+    </header>
+
+    <main id="cyclerDaysContainer"></main>
+
+    <footer>
+        <button class="btn-sec" onclick="window.close()">Cancel</button>
+        <button class="btn-primary2" onclick="addPlanDay()">+ Add Day</button>
+        <button class="btn-sec" onclick="applyDeload()">🧪 Deload Next Cycle (-10%)</button>
+        <button class="btn-save-plan" onclick="saveCyclerPlan()">✅ Write to sessions.py</button>
+    </footer>
+
+    <script>
+        let currentPlan = [];
+
+        async function initPlanner() {
+            const res = await pywebview.api.get_plan();
+            if (!res.success) {
+                alert(res.error);
+                window.close();
+                return;
+            }
+            currentPlan = res.planned;
+            document.getElementById("cyclerTitle").innerText = "Plan Next Cycle (" + res.why + ")";
+            renderCyclerDays();
+        }
+
+        function renderCyclerDays() {
+            const container = document.getElementById("cyclerDaysContainer");
+            container.innerHTML = "";
+
+            currentPlan.forEach((d, dayIdx) => {
+                const dayCard = document.createElement("div");
+                dayCard.className = "plan-day-card";
+
+                let rowsHtml = "";
+                d.exercises.forEach((ex, exIdx) => {
+                    rowsHtml += `
+                        <div class="plan-row-grid plan-item-row">
+                            <div class="order-btn-group">
+                                <button class="btn-arrow" onclick="moveEx(${dayIdx}, ${exIdx}, -1)" ${exIdx===0?'disabled style="opacity:0.3;"':''}>▲</button>
+                                <button class="btn-arrow" onclick="moveEx(${dayIdx}, ${exIdx}, 1)" ${exIdx===d.exercises.length-1?'disabled style="opacity:0.3;"':''}>▼</button>
+                            </div>
+                            <input type="text" class="plan-input" style="font-family: 'JetBrains Mono', monospace;" value="${ex.var_name}" oninput="updateEx(${dayIdx}, ${exIdx}, 'var_name', this.value)" placeholder="exercise_slug">
+                            <input type="number" class="plan-input center" value="${ex.sets}" oninput="updateEx(${dayIdx}, ${exIdx}, 'sets', this.value)">
+                            <input type="text" class="plan-input center" style="font-family: 'JetBrains Mono', monospace;" value="${ex.reps}" oninput="updateEx(${dayIdx}, ${exIdx}, 'reps', this.value)">
+                            <input type="text" class="plan-input center" style="font-family: 'JetBrains Mono', monospace;" value="${ex.mass}" oninput="updateEx(${dayIdx}, ${exIdx}, 'mass', this.value)">
+                            <input type="text" class="plan-input" value="${ex.comment || ''}" oninput="updateEx(${dayIdx}, ${exIdx}, 'comment', this.value)" placeholder="comment">
+                            <div style="display: flex; gap: 4px; align-items: center;">
+                                <button class="btn-pill-inc" onclick="incMass(${dayIdx}, ${exIdx})">+2.5kg</button>
+                                <button class="btn-pill-rep" onclick="incReps(${dayIdx}, ${exIdx})">+2 Reps</button>
+                                <button class="btn-trash" onclick="delEx(${dayIdx}, ${exIdx})">✕</button>
+                            </div>
+                        </div>
+                    `;
+                });
+
+                dayCard.innerHTML = `
+                    <div class="plan-day-hdr">
+                        <span class="day-pill">Day ${d.day_num}</span>
+                        <span class="date-label">Date:</span>
+                        <input type="date" class="plan-input" value="${d.date_str}" onchange="updateDayDate(${dayIdx}, this.value)" style="width: 140px;">
+                        <button class="btn-add-ex" style="margin-left: auto;" onclick="addEx(${dayIdx})">+ Add Exercise</button>
+                        <button class="btn-del-day" onclick="delDay(${dayIdx})">🗑️ Delete Day</button>
+                    </div>
+                    <div class="plan-row-grid" style="padding: 0 8px;">
+                        <div class="plan-col-head">Order</div>
+                        <div class="plan-col-head">Exercise Slug</div>
+                        <div class="plan-col-head" style="text-align: center;">Sets</div>
+                        <div class="plan-col-head" style="text-align: center;">Reps</div>
+                        <div class="plan-col-head" style="text-align: center;">Mass (kg)</div>
+                        <div class="plan-col-head">Comment</div>
+                        <div class="plan-col-head">Actions</div>
+                    </div>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">${rowsHtml}</div>
+                `;
+                container.appendChild(dayCard);
+            });
+        }
+
+        function updateEx(dIdx, eIdx, field, val) { currentPlan[dIdx].exercises[eIdx][field] = val; }
+        function updateDayDate(dIdx, val) { currentPlan[dIdx].date_str = val; }
+        function moveEx(dIdx, eIdx, dir) {
+            const arr = currentPlan[dIdx].exercises;
+            const target = eIdx + dir;
+            if (target < 0 || target >= arr.length) return;
+            const temp = arr[eIdx]; arr[eIdx] = arr[target]; arr[target] = temp;
+            renderCyclerDays();
+        }
+        function incMass(dIdx, eIdx) {
+            const ex = currentPlan[dIdx].exercises[eIdx];
+            const mParts = (ex.mass + "").split(",").map(p => {
+                const v = parseFloat(p.trim());
+                return !isNaN(v) && v > 0 ? (Math.round((v + 2.5) * 100) / 100) : p.trim();
+            });
+            ex.mass = mParts.join(", ");
+
+            // Automatically track increment in Comment field
+            let c = (ex.comment || "").trim();
+            const match = c.match(/\+([0-9.]+)\s*kg/i);
+            if (match) {
+                const currPlus = parseFloat(match[1]);
+                const newPlus = Math.round((currPlus + 2.5) * 100) / 100;
+                c = c.replace(/\+[0-9.]+\s*kg/i, `+${newPlus} kg`);
+            } else {
+                c = (c + " +2.5 kg").trim();
+            }
+            ex.comment = c;
+
+            renderCyclerDays();
+        }
+
+        function incReps(dIdx, eIdx) {
+            const ex = currentPlan[dIdx].exercises[eIdx];
+            const rParts = (ex.reps + "").split(",").map(p => {
+                const v = parseInt(p.trim());
+                return !isNaN(v) ? (v + 2) : p.trim();
+            });
+            ex.reps = rParts.join(", ");
+
+            // Automatically track rep increment in Comment field
+            let c = (ex.comment || "").trim();
+            const match = c.match(/\+([0-9]+)\s*reps/i);
+            if (match) {
+                const currPlus = parseInt(match[1]);
+                const newPlus = currPlus + 2;
+                c = c.replace(/\+[0-9]+\s*reps/i, `+${newPlus} reps`);
+            } else {
+                c = (c + " +2 reps").trim();
+            }
+            ex.comment = c;
+
+            renderCyclerDays();
+        }
+
+        function delEx(dIdx, eIdx) { currentPlan[dIdx].exercises.splice(eIdx, 1); renderCyclerDays(); }
+        function addEx(dIdx) {
+            currentPlan[dIdx].exercises.push({ var_name: "squat", display_name: "Squat", sets: 3, reps: "6, 6, 6", mass: "80.0", comment: "" });
+            renderCyclerDays();
+        }
+        function delDay(dIdx) {
+            currentPlan.splice(dIdx, 1);
+            currentPlan.forEach((d, i) => d.day_num = i + 1);
+            renderCyclerDays();
+        }
+        function addPlanDay() {
+            const nextDayNum = currentPlan.length + 1;
+            const lastDate = currentPlan.length > 0 ? currentPlan[currentPlan.length - 1].date_str : new Date().toISOString().split('T')[0];
+            const d = new Date(lastDate);
+            d.setDate(d.getDate() + 2);
+            currentPlan.push({
+                day_num: nextDayNum,
+                date_str: d.toISOString().split('T')[0],
+                exercises: [{ var_name: "squat", display_name: "Squat", sets: 3, reps: "6, 6, 6", mass: "80.0", comment: "" }]
+            });
+            renderCyclerDays();
+        }
+        function applyDeload() {
+            currentPlan.forEach(d => {
+                d.exercises.forEach(ex => {
+                    const mParts = (ex.mass + "").split(",").map(p => {
+                        const v = parseFloat(p.trim());
+                        return !isNaN(v) && v > 0 ? (Math.round((v * 0.9) * 2) / 2) : p.trim();
+                    });
+                    ex.mass = mParts.join(", ");
+                    let c = (ex.comment || "").trim();
+                    if (!c.includes("10% decreased deload") && !c.includes("Deload -10%")) {
+                        c = (c ? c + " · " : "") + "10% decreased deload";
+                    }
+                    ex.comment = c;
+                });
+            });
+            renderCyclerDays();
+        }
+        async function saveCyclerPlan() {
+            const res = await pywebview.api.save_plan(currentPlan);
+            if (res.success) {
+                alert(`✅ Successfully created plan with ${currentPlan.length} days!`);
+                window.close();
+            } else {
+                alert("Error writing plan: " + res.error);
+            }
+        }
+
+        function startPlannerApp() {
+            if (window.pywebview && window.pywebview.api) {
+                initPlanner();
+            } else {
+                window.addEventListener('pywebviewready', initPlanner);
+                let attempts = 0;
+                const timer = setInterval(() => {
+                    attempts++;
+                    if (window.pywebview && window.pywebview.api) {
+                        clearInterval(timer);
+                        initPlanner();
+                    } else if (attempts > 30) {
+                        clearInterval(timer);
+                    }
+                }, 100);
+            }
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', startPlannerApp);
+        } else {
+            startPlannerApp();
+        }
+    </script>
+</body>
+</html>
+"""
+
+
+_MAIN_WINDOW: Optional[webview.Window] = None
+_PLANNER_WINDOW: Optional[webview.Window] = None
+
+
+class WebViewBridgeApi:
+    """Python backend bridge API matching 100% of CustomTkinter engine features."""
+
     def __init__(self):
-        super().__init__()
-
-        self.title("Iron Log - Strength Tracker")
-        self.geometry("1150x720")
-        self.minsize(960, 640)
-
-        # Set the custom window icon
-        icon_path = resource_path(os.path.join("media", "GUI", "biceps.ico"))
-        if os.path.exists(icon_path):
-            self.iconbitmap(icon_path)
-
         self.manager = ProfileManager()
-        self.menu = None
-        self._status_reset_id = None  # handle for the auto-reset after() call
-        self.last_generated_at = None  # timestamp of last successful Excel generation
-        self.init_menu()
+        self.last_gen_time = ""
 
-        # Start auto-update loop if enabled
-        self.update_thread_stop_event = threading.Event()
-        self.start_auto_update_loop()
+    def _load_sessions(self, p: Profile):
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
+        if not os.path.exists(sessions_file):
+            return None, sessions_file
 
-        self.container = ctk.CTkFrame(self)
-        self.container.pack(fill="both", expand=True)
+        sessions_dir = os.path.dirname(sessions_file)
+        if sessions_dir not in sys.path:
+            sys.path.insert(0, sessions_dir)
 
-        # ── Resize debouncer ─────────────────────────────────────────────────
-        # Use add="+" so we ADD to existing bindings rather than replacing the
-        # CTkTitleMenu's <Configure> hook (which caused the menu to disappear).
-        self._resize_job = None
-        self.bind("<Configure>", self._on_root_configure, add="+")
-
-        if not self.manager.profiles:
-            self.show_profile_creator()
-        elif (
-            self.manager.remember_last_user and self.manager.active_profile_index != -1
-        ):
-            self.show_dashboard()
+        if "sessions" in sys.modules:
+            sess = importlib.reload(sys.modules["sessions"])
         else:
-            self.show_profile_picker()
+            import sessions as sess
+        return sess, sessions_file
 
-    def _on_root_configure(self, event):
-        """Rate-limit CTk's expensive canvas redraws to 40 ms."""
-        if event.widget is not self:
-            return
-        if self._resize_job:
-            self.after_cancel(self._resize_job)
-        self._resize_job = self.after(40, self._do_resize)
+    def open_planner_window(self):
+        """Spawns the Dynamic Plan Cycler as a dedicated standalone window."""
+        global _PLANNER_WINDOW
+        if _PLANNER_WINDOW:
+            try:
+                _PLANNER_WINDOW.show()
+                return {"success": True}
+            except Exception:
+                _PLANNER_WINDOW = None
 
-    def _do_resize(self):
-        self._resize_job = None
-        # Force CTk to flush pending layout in one batch instead of per-pixel
-        self.update_idletasks()
-
-    # -------------------------------------------------------------------------
-    # Status bar helper
-    # -------------------------------------------------------------------------
-    def set_status(self, text: str, color: str = "gray", auto_reset_ms: int = 0):
-        """Update the status label.  If auto_reset_ms > 0 the label resets to
-        'Ready' after that many milliseconds, cancelling any previous timer."""
-        if not hasattr(self, "status_label"):
-            return
-        # Cancel any pending auto-reset
-        if self._status_reset_id is not None:
-            self.after_cancel(self._status_reset_id)
-            self._status_reset_id = None
-        self.status_label.configure(text=text, text_color=color)
-        if auto_reset_ms > 0:
-            self._status_reset_id = self.after(auto_reset_ms, self._reset_status)
-
-    def _reset_status(self):
-        self._status_reset_id = None
-        if hasattr(self, "status_label"):
-            self.status_label.configure(text="Ready", text_color="gray")
-
-    def _resolve_mass_for_date(self, date_str, bm_log):
-        if not bm_log:
-            return None
-        dates = sorted(bm_log.keys())
-        applicable_date = None
-        for d in dates:
-            if d <= date_str:
-                applicable_date = d
-            else:
-                break
-        if not applicable_date:
-            return None
-        bm_entry = bm_log[applicable_date]
-        return (
-            bm_entry if isinstance(bm_entry, (int, float)) else bm_entry.get("mass", 0)
+        _PLANNER_WINDOW = webview.create_window(
+            title="Iron Log - Plan Next Cycle",
+            html=PLANNER_HTML_TEMPLATE,
+            js_api=self,
+            width=1100,
+            height=750,
+            min_size=(860, 560),
+            background_color="#0A0D14",
         )
+        return {"success": True}
 
-    # -------------------------------------------------------------------------
-    # Auto-update
-    # -------------------------------------------------------------------------
-    def start_auto_update_loop(self):
-        def loop():
-            while not self.update_thread_stop_event.is_set():
-                if self.manager.auto_check_updates:
-                    self.run_update_check(manual=False)
-                # Wait 30 minutes (1800 s), checking stop_event every 5 seconds
-                for _ in range(360):
-                    if self.update_thread_stop_event.is_set():
-                        break
-                    time.sleep(5)
-
-        t = threading.Thread(target=loop, daemon=True)
-        t.start()
-
-    def run_update_check(self, manual=False):
-        def check():
-            if manual:
-                self.after(
-                    0, lambda: self.set_status("Checking for updates...", "white")
-                )
-
-            has_update, new_version, download_url = check_for_updates(__version__)
-            if has_update:
-                self.after(0, lambda: self.prompt_update(new_version, download_url))
-            elif manual:
-                self.after(
-                    0,
-                    lambda: messagebox.showinfo(
-                        "No Updates", f"You are on the latest version ({__version__})."
-                    ),
-                )
-                self.after(0, lambda: self.set_status("Ready", "gray"))
-
-        threading.Thread(target=check, daemon=True).start()
-
-    def prompt_update(self, new_version, download_url):
-        msg = f"Hey, a new version (v{new_version}) is found. Do you want me to restart and update?"
-        if messagebox.askyesno("Update Available", msg):
-            self.perform_update(download_url)
-
-    def perform_update(self, download_url):
-        if getattr(self, "is_updating", False):
-            return
-        self.is_updating = True
-
-        dl_win = ctk.CTkToplevel(self)
-        dl_win.title("Downloading Update")
-        dl_win.geometry("350x150")
-        dl_win.attributes("-topmost", True)
-
-        lbl = ctk.CTkLabel(
-            dl_win,
-            text="Downloading new version...\n(This will take about a minute depending on internet speed)",
-            font=("Roboto", 12),
-        )
-        lbl.pack(pady=40, padx=20)
-
-        def download_process():
-            download_and_install_update(download_url)
-
-            def exit_app():
-                self.quit()
-                self.destroy()
-                os._exit(0)
-
-            self.after(0, exit_app)
-
-        threading.Thread(target=download_process, daemon=True).start()
-
-    # -------------------------------------------------------------------------
-    # Menu
-    # -------------------------------------------------------------------------
-    def init_menu(self):
-        if self.menu:
-            self.menu.destroy()
-
-        self.menu = CTkTitleMenu(self)
-
-        # App Menu
-        app_btn = self.menu.add_cascade("App")
-        app_dropdown = CustomDropdownMenu(widget=app_btn)
-
-        app_dropdown.add_option(option="About Iron Log", command=self.show_about_dialog)
-        app_dropdown.add_separator()
-
-        app_dropdown.add_option(
-            option="Check for Updates",
-            command=lambda: self.run_update_check(manual=True),
-        )
-        app_dropdown.add_separator()
-        app_dropdown.add_option(option="New Profile", command=self.show_profile_creator)
-        app_dropdown.add_option(option="Switch User", command=self.show_profile_picker)
-        app_dropdown.add_separator()
-        app_dropdown.add_option(
-            option="Open App Data Folder", command=self.open_app_data_folder
-        )
-        app_dropdown.add_separator()
-        app_dropdown.add_option(option="Exit", command=self.quit)
-
-        # Settings Menu
-        self.init_settings_menu()
-
-        # Profiles Menu
-        self.update_profiles_menu()
-
-        # Experimental Menu
-        self.init_experimental_menu()
-
-    def update_profiles_menu(self):
-        prof_btn = self.menu.add_cascade("Profiles")
-        prof_dropdown = CustomDropdownMenu(widget=prof_btn)
-
-        for i, profile in enumerate(self.manager.profiles):
-            sub = prof_dropdown.add_submenu(profile.name)
-            sub.add_option(
-                option="Select", command=lambda idx=i: self.select_profile(idx)
-            )
-            sub.add_option(
-                option="Edit", command=lambda idx=i: self.show_profile_creator(idx)
-            )
-            sub.add_separator()
-            sub.add_option(
-                option="Delete", command=lambda idx=i: self.delete_profile(idx)
-            )
-
-    def init_settings_menu(self):
-        settings_btn = self.menu.add_cascade("Settings")
-        settings_dropdown = CustomDropdownMenu(widget=settings_btn)
-
-        status = "Enabled" if self.manager.remember_last_user else "Disabled"
-        settings_dropdown.add_option(
-            option=f"Auto-Login: {status}", command=self.toggle_auto_login
-        )
-
-        update_status = "Enabled" if self.manager.auto_check_updates else "Disabled"
-        settings_dropdown.add_option(
-            option=f"Auto-Update: {update_status}", command=self.toggle_auto_update
-        )
-
+    def get_settings(self) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
-        if p:
-            settings_dropdown.add_separator()
-            pr_status = "ON" if p.show_pr else "OFF"
-            std_status = "ON" if p.show_standards else "OFF"
-            mile_status = "ON" if p.show_milestones else "OFF"
+        return {
+            "auto_login": self.manager.remember_last_user,
+            "auto_update": self.manager.auto_check_updates,
+            "show_pr": getattr(p, "show_pr", True) if p else True,
+            "show_standards": getattr(p, "show_standards", True) if p else True,
+            "show_milestones": getattr(p, "show_milestones", True) if p else True,
+        }
 
-            settings_dropdown.add_option(
-                option=f"Show PRs: {pr_status}",
-                command=lambda: self.toggle_feature("show_pr"),
-            )
-            settings_dropdown.add_option(
-                option=f"Show Standards: {std_status}",
-                command=lambda: self.toggle_feature("show_standards"),
-            )
-            settings_dropdown.add_option(
-                option=f"Show Milestones: {mile_status}",
-                command=lambda: self.toggle_feature("show_milestones"),
-            )
-
-    def init_experimental_menu(self):
-        exp_btn = self.menu.add_cascade("🧪 Experimental")
-        exp_dropdown = CustomDropdownMenu(widget=exp_btn)
-        exp_dropdown.add_option(
-            option="Prefill Mass Dates", command=self.run_bodymass_prefill
-        )
-        exp_dropdown.add_option(
-            option="Fill-in Missing Masses", command=self.run_mass_fillin_dialog
-        )
-        exp_dropdown.add_separator()
-        exp_dropdown.add_option(
-            option="Validate sessions.py", command=self.run_validate_sessions
-        )
-
-    def show_about_dialog(self):
-        win = ctk.CTkToplevel(self)
-        win.title("About Iron Log")
-        win.geometry("350x250")
-        win.resizable(False, False)
-        win.attributes("-topmost", True)
-        win.after(100, win.focus_force)
-
-        ctk.CTkLabel(win, text="Iron Log", font=("Roboto", 24, "bold")).pack(
-            pady=(20, 5)
-        )
-        ctk.CTkLabel(
-            win, text=f"Version {__version__}", font=("Roboto", 13), text_color="#aaa"
-        ).pack(pady=(0, 15))
-
-        ctk.CTkLabel(win, text="Author: Rustem Nizamov", font=("Roboto", 14)).pack(
-            pady=5
-        )
-
-        def open_gh():
-            import webbrowser
-
-            webbrowser.open("https://github.com/Rusya665/iron-log")
-
-        ctk.CTkButton(
-            win,
-            text="GitHub Repository",
-            fg_color="#333",
-            hover_color="#555",
-            command=open_gh,
-        ).pack(pady=20)
-
-    def toggle_auto_login(self):
-        self.manager.remember_last_user = not self.manager.remember_last_user
-        self.manager.save_profiles()
-        self.init_menu()
-        self.set_status(
-            f"Auto-Login {'enabled' if self.manager.remember_last_user else 'disabled'}",
-            "gray",
-            auto_reset_ms=4000,
-        )
-
-    def toggle_auto_update(self):
-        self.manager.auto_check_updates = not self.manager.auto_check_updates
-        self.manager.save_profiles()
-        self.init_menu()
-        self.set_status(
-            f"Auto-Update {'enabled' if self.manager.auto_check_updates else 'disabled'}",
-            "gray",
-            auto_reset_ms=4000,
-        )
-        if self.manager.auto_check_updates:
-            self.run_update_check(manual=False)
-
-    def toggle_feature(self, feature_name):
+    def toggle_setting(self, setting_name: str) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
-        if p:
-            current_val = getattr(p, feature_name)
-            setattr(p, feature_name, not current_val)
-            self.manager.save_profiles()
-            self.init_menu()
-            status = "enabled" if getattr(p, feature_name) else "disabled"
-            feature_display = feature_name.replace("show_", "").upper()
-            self.set_status(
-                f"Chart Feature {feature_display} {status}", "gray", auto_reset_ms=4000
-            )
+        if setting_name == "auto_login":
+            self.manager.remember_last_user = not self.manager.remember_last_user
+        elif setting_name == "auto_update":
+            self.manager.auto_check_updates = not self.manager.auto_check_updates
+        elif p and hasattr(p, setting_name):
+            setattr(p, setting_name, not getattr(p, setting_name))
+        self.manager.save_profiles()
+        return self.get_settings()
 
-    # -------------------------------------------------------------------------
-    # Container helpers
-    # -------------------------------------------------------------------------
-    def clear_container(self):
-        for widget in self.container.winfo_children():
-            widget.destroy()
+    def get_profiles(self) -> Dict[str, Any]:
+        return {
+            "active_index": self.manager.active_profile_index,
+            "profiles": [p.to_dict() for p in self.manager.profiles],
+        }
 
-    # -------------------------------------------------------------------------
-    # Profile picker / creator
-    # -------------------------------------------------------------------------
-    def show_profile_picker(self):
-        self.clear_container()
-
-        label = ctk.CTkLabel(
-            self.container, text="Select Your Profile", font=("Roboto", 24, "bold")
-        )
-        label.pack(pady=40)
-
-        grid = ctk.CTkFrame(self.container, fg_color="transparent")
-        grid.pack(pady=10)
-
-        for i, profile in enumerate(self.manager.profiles):
-            btn = ctk.CTkButton(
-                grid,
-                text=profile.name,
-                width=200,
-                height=100,
-                command=lambda idx=i: self.select_profile(idx),
-            )
-            btn.grid(row=i // 3, column=i % 3, padx=10, pady=10)
-
-        add_btn = ctk.CTkButton(
-            self.container,
-            text="+ New Profile",
-            command=self.show_profile_creator,
-            fg_color="gray",
-        )
-        add_btn.pack(pady=20)
-
-    def delete_profile(self, index):
-        if messagebox.askyesno(
-            "Confirm Delete",
-            f"Are you sure you want to delete profile '{self.manager.profiles[index].name}'?",
-        ):
-            self.manager.delete_profile(index)
-            self.init_menu()
-            if not self.manager.profiles:
-                self.show_profile_creator()
-            else:
-                self.show_profile_picker()
-
-    def show_profile_creator(self, profile_index=None):
-        self.clear_container()
-        is_edit = profile_index is not None
-        title = "Edit Profile" if is_edit else "Create New Profile"
-        p = self.manager.profiles[profile_index] if is_edit else None
-
-        ctk.CTkLabel(self.container, text=title, font=("Roboto", 24, "bold")).pack(
-            pady=20
-        )
-
-        form = ctk.CTkFrame(self.container)
-        form.pack(pady=10, padx=50, fill="x")
-
-        ctk.CTkLabel(form, text="Name:").grid(
-            row=0, column=0, padx=10, pady=10, sticky="e"
-        )
-        name_entry = ctk.CTkEntry(form, placeholder_text="e.g. Rusya")
-        name_entry.grid(row=0, column=1, padx=10, pady=10, sticky="w")
-        if p:
-            name_entry.insert(0, p.name)
-
-        ctk.CTkLabel(form, text="Sex:").grid(
-            row=1, column=0, padx=10, pady=10, sticky="e"
-        )
-        sex_var = ctk.StringVar(value=p.sex if p else "male")
-        ctk.CTkRadioButton(form, text="Male", variable=sex_var, value="male").grid(
-            row=1, column=1, padx=10, pady=10, sticky="w"
-        )
-        ctk.CTkRadioButton(form, text="Female", variable=sex_var, value="female").grid(
-            row=1, column=1, padx=80, pady=10, sticky="w"
-        )
-
-        ctk.CTkLabel(form, text="Data Folder:").grid(
-            row=2, column=0, padx=10, pady=10, sticky="e"
-        )
-        sessions_entry = ctk.CTkEntry(form, width=300)
-        sessions_entry.grid(row=2, column=1, padx=10, pady=10)
-
-        hint = ctk.CTkLabel(
-            form,
-            text="Each user needs their own folder.\nExcel logs will be saved in a 'gym' subfolder here.",
-            font=("Roboto", 11),
-            text_color="gray",
-            justify="left",
-        )
-        hint.grid(row=3, column=1, sticky="w", padx=10, pady=(0, 10))
-
-        if p:
-            sessions_entry.insert(0, p.sessions_dir)
-
-        def browse_sessions():
-            path = ctk.filedialog.askdirectory()
-            if not path:
-                return
-            sessions_entry.delete(0, "end")
-            sessions_entry.insert(0, path)
-
-            # ── Immediate folder validation on Browse ─────────────────────────
-            current_name = name_entry.get().strip()
-            sessions_file = os.path.join(path, "sessions.py")
-            if os.path.exists(sessions_file):
-                from core.plan_generator import detect_sessions_owner
-                existing_owner = detect_sessions_owner(sessions_file)
-                if existing_owner and existing_owner.strip().lower() != current_name.lower():
-                    msg = (
-                        f"This folder already contains data belonging to '{existing_owner}'.\n\n"
-                        f"Choose 'Yes' to continue as '{existing_owner}' (uses existing data).\n"
-                        f"Choose 'No' to START FRESH for '{current_name or 'new user'}' "
-                        f"(overwrites existing data).\n"
-                        f"Choose 'Cancel' to pick a different folder."
-                    )
-                    res = messagebox.askyesnocancel("Folder Already in Use", msg)
-                    if res is None:  # Cancel — clear the field
-                        sessions_entry.delete(0, "end")
-                        return
-                    if res is True:  # Continue as existing owner
-                        # Populate name field with the real owner name
-                        name_entry.delete(0, "end")
-                        name_entry.insert(0, existing_owner)
-                        validation_label.configure(
-                            text=f"ℹ️  Name updated to match existing owner '{existing_owner}'",
-                            text_color="#90caf9",
-                        )
-                    # res is False → user chose Start Fresh; leave path set, name unchanged
-
-        ctk.CTkButton(form, text="Browse", width=60, command=browse_sessions).grid(
-            row=2, column=2, padx=10
-        )
-
-        # Inline validation hint
-        validation_label = ctk.CTkLabel(
-            self.container, text="", text_color="orange", font=("Roboto", 11)
-        )
-        validation_label.pack()
-
-        def save():
-            name = name_entry.get().strip()
-            s_dir = sessions_entry.get().strip()
-            if not name or not s_dir:
-                validation_label.configure(
-                    text="⚠️  Name and Sessions Dir are required!"
-                )
-                return
-
-            # ── Isolation Guard ──────────────────────────────────────────────
-            sessions_file = os.path.join(s_dir, "sessions.py")
-            if os.path.exists(sessions_file):
-                from core.plan_generator import detect_sessions_owner
-
-                existing_owner = detect_sessions_owner(sessions_file)
-
-                if existing_owner and existing_owner.strip().lower() != name.lower():
-                    msg = (
-                        f"This folder already contains data belonging to '{existing_owner}'.\n\n"
-                        f"Choose 'Yes' to continue as '{existing_owner}' (uses existing data).\n"
-                        f"Choose 'No' to START FRESH for '{name}' "
-                        f"(this will overwrite existing data).\n"
-                        f"Choose 'Cancel' to pick a different folder."
-                    )
-                    res = messagebox.askyesnocancel("Folder Already in Use", msg)
-                    if res is None:  # Cancel
-                        return
-                    if res is False:  # Start Fresh
-                        if messagebox.askyesno(
-                            "Confirm Fresh Start",
-                            f"Are you sure you want to initialize a NEW split for {name}?\n\nThis will clear any old logs in this folder.",
-                        ):
-                            new_p = Profile(
-                                name=name,
-                                sessions_dir=s_dir,
-                                output_dir=os.path.join(s_dir, "gym"),
-                                sex=sex_var.get(),
-                            )
-                            self._launch_initial_split_builder(
-                                new_p, sessions_file, is_edit, profile_index
-                            )
-                            return
-                        else:
-                            return
-                    # if True (Yes / Continue as existing owner), adopt that name
-                    name = existing_owner
-
-            elif not os.path.exists(sessions_file):
-                validation_label.configure(
-                    text="⚠️  sessions.py not found in that folder!"
-                )
-                if messagebox.askyesno(
-                    "sessions.py Not Found",
-                    f"sessions.py was not found in:\n{s_dir}\n\nDo you want to initialize it with a new split now?",
-                ):
-                    new_p = Profile(
-                        name=name,
-                        sessions_dir=s_dir,
-                        output_dir=os.path.join(s_dir, "gym"),
-                        sex=sex_var.get(),
-                    )
-                    self._launch_initial_split_builder(
-                        new_p, sessions_file, is_edit, profile_index
-                    )
-                    return
-                elif not messagebox.askyesno(
-                    "Save anyway", "Save profile anyway without sessions.py?"
-                ):
-                    return
-
-            new_p = Profile(
-                name=name,
-                sessions_dir=s_dir,
-                output_dir=os.path.join(s_dir, "gym"),
-                sex=sex_var.get(),
-            )
-
-            if is_edit:
-                self.manager.update_profile(profile_index, new_p)
-                self.init_menu()
-                self.show_dashboard()
-            else:
-                self.manager.add_profile(new_p)
-                self.init_menu()
-                self.show_profile_picker()
-
-        btn_text = "Save Changes" if is_edit else "Create Profile"
-        ctk.CTkButton(
-            self.container, text=btn_text, command=save, fg_color="green"
-        ).pack(pady=20)
-
-        if self.manager.profiles:
-            cancel_cmd = self.show_dashboard if is_edit else self.show_profile_picker
-            ctk.CTkButton(self.container, text="Cancel", command=cancel_cmd).pack()
-
-    def _launch_initial_split_builder(self, p, sessions_file, is_edit, profile_index):
-        dialog = DynamicPlanDialog(
-            self,
-            sessions_file,
-            p,
-            title="Create Initial Split",
-            mode="initial",
-            profile_is_edit=is_edit,
-            profile_index=profile_index,
-        )
-        self.wait_window(dialog)
-
-    def select_profile(self, index):
+    def select_profile(self, index: int) -> Dict[str, Any]:
         self.manager.set_active(index)
-        self.show_dashboard()
+        return {"success": True}
 
-    # -------------------------------------------------------------------------
-    # Dashboard
-    # -------------------------------------------------------------------------
-    def show_dashboard(self):
-        self.clear_container()
-        p = self.manager.get_active_profile()
-        if not p:
-            # Fallback to profile management if no active profile found
-            self.show_profile_manager()
-            return
+    def save_profile(self, profile_data: Dict[str, Any], is_edit: bool = False, index: int = 0) -> Dict[str, Any]:
+        name = profile_data.get("name", "").strip()
+        s_dir = profile_data.get("sessions_dir", "").strip()
+        sex = profile_data.get("sex", "male")
 
-        # ── Sidebar ──────────────────────────────────────────────────────────
-        sidebar = ctk.CTkFrame(
-            self.container, width=210, corner_radius=0, fg_color="#161616"
+        if not name:
+            return {"success": False, "error": "Profile name cannot be empty."}
+        if not s_dir:
+            return {"success": False, "error": "Data folder path cannot be empty."}
+
+        new_p = Profile(
+            name=name,
+            sessions_dir=s_dir,
+            output_dir=os.path.join(s_dir, "gym"),
+            sex=sex,
         )
-        sidebar.pack(side="left", fill="y")
-        sidebar.pack_propagate(False)
-
-        # Profile name block
-        ctk.CTkLabel(
-            sidebar,
-            text=p.name,
-            font=("Roboto", 17, "bold"),
-            text_color="white",
-            anchor="w",
-        ).pack(fill="x", padx=16, pady=(22, 2))
-        ctk.CTkLabel(
-            sidebar, text="Iron Log", font=("Roboto", 11), text_color="#555", anchor="w"
-        ).pack(fill="x", padx=16, pady=(0, 14))
-        ctk.CTkFrame(sidebar, height=1, fg_color="#2e2e2e").pack(
-            fill="x", padx=16, pady=(0, 12)
-        )
-
-        # Primary actions
-        _p = {
-            "height": 44,
-            "corner_radius": 8,
-            "font": ("Roboto", 13, "bold"),
-            "anchor": "center",
-        }
-        ctk.CTkButton(
-            sidebar,
-            text="🚀 Generate Excel Log",
-            fg_color="#1565C0",
-            hover_color="#1976D2",
-            command=self.run_log_generator,
-            **_p,
-        ).pack(fill="x", padx=12, pady=3)
-        ctk.CTkButton(
-            sidebar,
-            text="🗓️ Plan Next Cycle",
-            fg_color="#6A1B9A",
-            hover_color="#7B1FA2",
-            command=self.run_plan_generator,
-            **_p,
-        ).pack(fill="x", padx=12, pady=3)
-        ctk.CTkButton(
-            sidebar,
-            text="📂 Open Latest Log",
-            fg_color="#1B5E20",
-            hover_color="#2E7D32",
-            command=self.open_latest_excel,
-            **_p,
-        ).pack(fill="x", padx=12, pady=3)
-
-        ctk.CTkFrame(sidebar, height=1, fg_color="#2e2e2e").pack(
-            fill="x", padx=16, pady=12
-        )
-
-        # Secondary actions
-        _s = {
-            "height": 36,
-            "corner_radius": 7,
-            "font": ("Roboto", 12),
-            "anchor": "w",
-            "fg_color": "#252525",
-            "hover_color": "#333",
-            "text_color": "#bbb",
-        }
-        ctk.CTkButton(
-            sidebar, text="  📝  Edit Sessions", command=self.edit_sessions, **_s
-        ).pack(fill="x", padx=12, pady=2)
-        ctk.CTkButton(
-            sidebar, text="  📊  Output Folder", command=self.open_output, **_s
-        ).pack(fill="x", padx=12, pady=2)
-        ctk.CTkButton(
-            sidebar,
-            text="  📚  Exercise Library",
-            command=self.show_exercise_library,
-            **_s,
-        ).pack(fill="x", padx=12, pady=2)
-        ctk.CTkButton(
-            sidebar, text="  ⚡  Run Scraper", command=self.run_scraper, **_s
-        ).pack(fill="x", padx=12, pady=2)
-
-        # Bottom of sidebar — status + last-generated
-        self.status_label = ctk.CTkLabel(
-            sidebar, text="Ready", text_color="#555", font=("Roboto", 11), anchor="w"
-        )
-        self.status_label.pack(side="bottom", fill="x", padx=16, pady=(4, 14))
-
-        self.last_gen_label = ctk.CTkLabel(
-            sidebar, text="", text_color="#444", font=("Roboto", 10), anchor="w"
-        )
-        self.last_gen_label.pack(side="bottom", fill="x", padx=16, pady=(0, 2))
-        if self.last_generated_at:
-            self.last_gen_label.configure(text=f"Last gen: {self.last_generated_at}")
-
-        # ── Main content ─────────────────────────────────────────────────────
-        content = ctk.CTkFrame(self.container, fg_color="transparent")
-        content.pack(side="left", fill="both", expand=True, padx=18, pady=14)
-
-        # Header row: title + refresh button
-        hdr_row = ctk.CTkFrame(content, fg_color="transparent")
-        hdr_row.pack(fill="x", pady=(2, 14))
-        ctk.CTkLabel(hdr_row, text="Recent Sessions", font=("Roboto", 22, "bold")).pack(
-            side="left"
-        )
-        ctk.CTkButton(
-            hdr_row,
-            text="↻  Refresh",
-            width=100,
-            height=30,
-            font=("Roboto", 12),
-            fg_color="#252525",
-            hover_color="#333",
-            command=lambda: threading.Thread(
-                target=self._load_recent_sessions, daemon=True
-            ).start(),
-        ).pack(side="right")
-
-        # Stats panel
-        self._stats_panel = ctk.CTkFrame(content, fg_color="transparent")
-        self._stats_panel.pack(fill="x", pady=(0, 14))
-
-        # Cards area — plain frame, no canvas overhead
-        self._sessions_panel = ctk.CTkFrame(content, fg_color="transparent")
-        self._sessions_panel.pack(fill="both", expand=True)
-
-        ctk.CTkLabel(
-            self._sessions_panel,
-            text="Loading…",
-            text_color="#555",
-            font=("Roboto", 13),
-        ).pack(expand=True)
-
-        threading.Thread(target=self._load_recent_sessions, daemon=True).start()
-
-    def _try_load_sessions(self, p):
-        """Like _load_sessions but silent — safe for background threads."""
-        if p.sessions_dir not in sys.path:
-            sys.path.insert(0, p.sessions_dir)
-        try:
-            file_path = os.path.join(p.sessions_dir, "sessions.py")
-            mtime = os.path.getmtime(file_path) if os.path.exists(file_path) else 0
-            if (
-                hasattr(self, "_cached_sessions_mtime")
-                and hasattr(self, "_cached_sessions_mod")
-                and self._cached_sessions_mtime == mtime
-                and mtime > 0
-            ):
-                return self._cached_sessions_mod
-
-            import sessions
-
-            importlib.reload(sessions)
-            self._cached_sessions_mtime = mtime
-            self._cached_sessions_mod = sessions
-            return sessions
-        except Exception:
-            return None
-
-    def _load_recent_sessions(self):
-        """Background thread: parse the last N workout sessions and push to UI."""
-        from core.plan_generator import detect_cycle
-
-        p = self.manager.get_active_profile()
-        if not p:
-            self.after(0, lambda: self._update_sessions_panel(None, None))
-            return
-
-        sessions = self._try_load_sessions(p)
-        if sessions is None:
-            self.after(0, lambda: self._update_sessions_panel(None, None))
-            return
-
-        date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-        sorted_dates = sorted(
-            [k for k in sessions.USER_DATA.keys() if date_pattern.match(k)],
-            reverse=True,
-        )
-
-        # Determine how many cards to show based on last session's day value
-        last_day_obj = None
-        if sorted_dates:
-            v = sessions.USER_DATA[sorted_dates[0]].get("day")
-            last_day_obj = v if isinstance(v, (int, str)) else None
-
-        if isinstance(last_day_obj, str):
-            # Post-special session (PR, Deload, etc.): show only that 1 card
-            show_dates = sorted_dates[:1]
+        if is_edit:
+            self.manager.update_profile(index, new_p)
         else:
-            N, _ = detect_cycle(sessions.USER_DATA)
-            n_cards = N if N else 3
-            show_dates = sorted_dates[:n_cards]
+            self.manager.add_profile(new_p)
+            self.manager.set_active(len(self.manager.profiles) - 1)
+        return {"success": True}
 
-        # Resolve display names via EXERCISE_STANDARDS
-        from core.standards import EXERCISE_STANDARDS
+    def delete_profile(self, index: int) -> Dict[str, Any]:
+        if 0 <= index < len(self.manager.profiles):
+            self.manager.delete_profile(index)
+            return {"success": True}
+        return {"success": False, "error": "Invalid profile index"}
 
-        id_to_name = {
-            slug: info.get("name", slug) for slug, info in EXERCISE_STANDARDS.items()
-        }
+    def browse_folder(self) -> str:
+        import tkinter as tk
+        from tkinter import filedialog
+        r = tk.Tk()
+        r.withdraw()
+        r.attributes("-topmost", True)
+        path = filedialog.askdirectory(parent=r)
+        r.destroy()
+        return path or ""
 
-        display_data = []
-        for date_str in reversed(show_dates):  # oldest first → left-to-right
-            day_data = sessions.USER_DATA[date_str]
-            # Extract raw day value (int = training day, str = special session)
+    def check_updates(self) -> Dict[str, Any]:
+        has_update, new_ver, dl_url = check_for_updates(__version__)
+        return {"has_update": has_update, "version": new_ver, "url": dl_url, "current": __version__}
+
+    def get_active_data(self) -> Dict[str, Any]:
+        p = self.manager.get_active_profile()
+        if not p:
+            return {"success": False, "error": "No profile selected"}
+
+        sess, file_path = self._load_sessions(p)
+        if not sess:
+            return {"success": False, "error": f"sessions.py not found at {file_path}"}
+
+        user_data = getattr(sess, "USER_DATA", {})
+        bm_log = getattr(sess, "BODYMASS_LOG", {})
+        stats = calculate_gym_stats(user_data)
+
+        date_pat = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+        sorted_dates = sorted([d for d in user_data.keys() if date_pat.match(d)], reverse=True)
+        N, _ = detect_cycle(user_data)
+        show_dates = sorted_dates[: N if N else 3]
+
+        recent_sessions = []
+        for d_str in reversed(show_dates):
+            day_data = user_data[d_str]
             v = day_data.get("day")
             day_obj = v if isinstance(v, (int, str)) else None
-            mass = self._resolve_mass_for_date(date_str, getattr(sessions, "BODYMASS_LOG", {}))
 
-            exercises_summary = []
+            # Resolve mass for date
+            mass = None
+            if bm_log:
+                for d in sorted(bm_log.keys()):
+                    if d <= d_str:
+                        bm_entry = bm_log[d]
+                        mass = bm_entry if isinstance(bm_entry, (int, float)) else bm_entry.get("mass", 0)
+                    else:
+                        break
+
+            exs = []
             for ex_id, log in day_data.items():
-                from core.models import Log
-
                 if not isinstance(log, Log):
                     continue
-                name = id_to_name.get(ex_id, ex_id)
-                display_name = name[:24] + "…" if len(name) > 24 else name
+                info = EXERCISE_STANDARDS.get(ex_id, {})
+                display_name = info.get("name", ex_id)
 
-                n_sets = len(log.reps)
-                max_lift = max(log.mass) if log.mass else 0
-                
                 # Format reps
+                n_sets = len(log.reps)
                 if len(set(log.reps)) == 1:
-                    reps_part = f"{n_sets} \u00d7 {log.reps[0]}"
+                    reps_part = f"{n_sets} × {log.reps[0]}"
                 else:
                     reps_part = "-".join(str(r) for r in log.reps)
 
                 # Format mass
+                max_lift = max(log.mass) if log.mass else 0
                 if log.mass and max(log.mass) > 0:
                     if len(set(log.mass)) == 1:
                         mass_part = f" @ {log.mass[0]}kg"
                     else:
-                        m_min, m_max = min(log.mass), max(log.mass)
-                        mass_part = f" @ {m_min}-{m_max}kg"
+                        mass_part = f" @ {min(log.mass)}-{max(log.mass)}kg"
                 else:
                     mass_part = " (BW)"
                     max_lift = mass if mass else 0
 
                 summary = f"{reps_part}{mass_part}"
-                exercises_summary.append((ex_id, display_name, summary, max_lift))
+                exs.append({
+                    "id": ex_id,
+                    "name": display_name,
+                    "summary": summary,
+                    "max_lift": max_lift,
+                })
 
-            display_data.append((date_str, day_obj, exercises_summary, mass))
+            recent_sessions.append({
+                "date": d_str,
+                "day": day_obj,
+                "mass": mass,
+                "exercises": exs,
+            })
 
-        # Check for profile mismatch
-        owner = getattr(sessions, "SESSIONS_OWNER", None)
-        is_mismatch = owner and owner.strip().lower() != p.name.lower()
-
-        from core.plan_generator import calculate_gym_stats
-        stats = calculate_gym_stats(sessions.USER_DATA)
-
-        self.after(
-            0,
-            lambda d=display_data, s=stats: self._update_sessions_panel(
-                d, last_day_obj, mismatch_owner=owner if is_mismatch else None, stats=s
-            ),
-        )
-
-    def _update_sessions_panel(
-        self, data, last_day_obj=None, mismatch_owner=None, stats=None
-    ):
-        """Main-thread callback: rebuild the recent sessions as horizontal cards.
-
-        Uses ONLY native tk widgets (tk.Frame / tk.Label) — zero CTk canvas
-        overhead — so window resizing stays instant regardless of card count.
-        """
-        if not hasattr(self, "_sessions_panel"):
-            return
-
-        self._update_stats_panel(stats)
-        for w in self._sessions_panel.winfo_children():
-            w.destroy()
-
-        if data is None:
-            ctk.CTkLabel(
-                self._sessions_panel,
-                text="Could not load sessions.py — check your profile path.",
-                text_color="#555",
-                font=("Roboto", 13),
-            ).pack(expand=True)
-            return
-        if not data:
-            ctk.CTkLabel(
-                self._sessions_panel,
-                text="No sessions found.",
-                text_color="#555",
-                font=("Roboto", 13),
-            ).pack(expand=True)
-            return
-
-        # Determine dark bg of the parent panel (set by CTk theme)
-        BG_DARK = "#121212"
-
-        if mismatch_owner:
-            banner = tk.Frame(self._sessions_panel, bg="#b91c1c", height=30)
-            banner.pack(fill="x", pady=(0, 10))
-            tk.Label(
-                banner,
-                text=f"⚠️ PROFILE MISMATCH: This data belongs to {mismatch_owner} (Profile: {self.manager.get_active_profile().name})",
-                bg="#b91c1c",
-                fg="white",
-                font=("Roboto", 11, "bold"),
-            ).pack(pady=4)
-
-        # Outer row — native Frame, no canvas needed
-        row = tk.Frame(self._sessions_panel, bg=BG_DARK)
-        row.pack(fill="both", expand=True)
-        for i in range(len(data)):
-            row.columnconfigure(i, weight=1)
-        row.rowconfigure(0, weight=1)
-
-        for col_i, (date_str, day_obj, exercises, mass) in enumerate(data):
-            is_pr = isinstance(day_obj, str) and day_obj.upper() == "PR"
-            
-            card_bg = "#2a1a00" if isinstance(day_obj, str) else "#1c1c1e"
-            hdr_fg = "#b45309" if is_pr else "#ffffff"
-            sep_bg = "#5a3000" if is_pr else "#2e2e2e"
-
-            # Card — plain tk.Frame with left/right padding via inner frame
-            card = tk.Frame(
-                row,
-                bg=card_bg,
-                bd=0,
-                highlightthickness=1,
-                highlightbackground="#2e2e2e",
-            )
-            card.grid(row=0, column=col_i, sticky="nsew", padx=6, pady=2)
-
-            # Header label
-            if isinstance(day_obj, int):
-                hdr_text = f"\U0001f4c5  {date_str}  \u00b7  Day {day_obj}"
-            elif isinstance(day_obj, str):
-                hdr_text = f"\U0001f4c5  {date_str}  \u00b7  {day_obj}"
-            else:
-                hdr_text = f"\U0001f4c5  {date_str}"
-
-            tk.Label(
-                card,
-                text=hdr_text,
-                bg=card_bg,
-                fg=hdr_fg,
-                font=("Roboto", 13, "bold"),
-                anchor="w",
-            ).pack(fill="x", padx=14, pady=(14, 6))
-
-            # Separator — 1-px native frame
-            tk.Frame(card, bg=sep_bg, height=1).pack(fill="x", padx=10, pady=(0, 8))
-
-            # Exercise rows
-            MAX_EX = 10
-            for ex_id, ex_name, summary, lift in exercises[:MAX_EX]:
-                ex_row = tk.Frame(card, bg=card_bg)
-                ex_row.pack(fill="x", padx=12, pady=1)
-                name_lbl = tk.Label(
-                    ex_row,
-                    text=ex_name,
-                    bg=card_bg,
-                    fg="#dddddd",
-                    font=("Roboto", 12),
-                    anchor="w",
-                )
-                name_lbl.pack(side="left")
-                tk.Label(
-                    ex_row,
-                    text=summary,
-                    bg=card_bg,
-                    fg="#888888",
-                    font=("Roboto", 11),
-                    anchor="e",
-                ).pack(side="right")
-
-                # Bind tooltip
-                ExerciseToolTip(
-                    name_lbl,
-                    ex_id,
-                    self.manager.get_active_profile().sex,
-                    mass=mass,
-                    lift=lift,
-                    is_pr=is_pr,
-                )
-
-            if len(exercises) > MAX_EX:
-                tk.Label(
-                    card,
-                    text=f"+ {len(exercises) - MAX_EX} more",
-                    bg=card_bg,
-                    fg="#444444",
-                    font=("Roboto", 11),
-                    anchor="w",
-                ).pack(fill="x", padx=14, pady=(4, 8))
-            else:
-                tk.Frame(card, bg=card_bg, height=8).pack()
-
-    def _update_stats_panel(self, stats):
-        if not hasattr(self, "_stats_panel"):
-            return
-
-        for w in self._stats_panel.winfo_children():
-            w.destroy()
-
-        if not stats:
-            return
-
-        # Draw 3 cards side-by-side using grid
-        self._stats_panel.columnconfigure(0, weight=1)
-        self._stats_panel.columnconfigure(1, weight=1)
-        self._stats_panel.columnconfigure(2, weight=1)
-
-        card_p = {
-            "fg_color": "#1c1c1e",
-            "border_color": "#2e2e2e",
-            "border_width": 1,
-            "corner_radius": 10
+        clean_stats = {
+            "total_days": stats.get("total_days", 0),
+            "this_year_days": stats.get("this_year_days", 0),
+            "this_month_days": stats.get("this_month_days", 0),
+            "latest_workout_date": stats.get("latest_workout_date", "N/A"),
+            "latest_workout_day": stats.get("latest_workout_day", "N/A"),
+            "current_split_weeks": stats.get("current_split_weeks", 0.0),
+            "current_split_start": stats.get("current_split_start", "N/A"),
+            "cycle_length": stats.get("cycle_length", "N/A"),
+            "split_days_exercises": stats.get("split_days_exercises", {}),
+            "split_sessions_details": [
+                {"date_str": s.get("date_str", ""), "day": s.get("day", ""), "exercises": list(s.get("exercises", []))}
+                for s in stats.get("split_sessions_details", [])
+            ],
         }
 
-        # Card 1: Gym Attendance
-        c1 = ctk.CTkFrame(self._stats_panel, **card_p)
-        c1.grid(row=0, column=0, padx=6, pady=2, sticky="nsew")
+        return {
+            "success": True,
+            "profile_name": p.name,
+            "stats": clean_stats,
+            "sessions": recent_sessions,
+        }
 
-        ctk.CTkLabel(
-            c1, text="GYM ATTENDANCE", font=("Roboto", 10, "bold"), text_color="#777"
-        ).pack(anchor="w", padx=14, pady=(12, 2))
-        ctk.CTkLabel(
-            c1, text=f"{stats['total_days']} Days", font=("Roboto", 24, "bold"), text_color="white"
-        ).pack(anchor="w", padx=14, pady=0)
-        ctk.CTkLabel(
-            c1,
-            text=f"{stats['this_year_days']} this year · {stats['this_month_days']} this month",
-            font=("Roboto", 11),
-            text_color="#555",
-        ).pack(anchor="w", padx=14, pady=(0, 12))
-
-        # Card 2: Current Split Duration
-        c2 = ctk.CTkFrame(self._stats_panel, **card_p, cursor="hand2")
-        c2.grid(row=0, column=1, padx=6, pady=2, sticky="nsew")
-
-        split_duration_text = f"{stats['current_split_weeks']:.1f} Weeks"
-        split_subtext = f"{stats['cycle_length'] or 'N/A'}-Day Split · started {stats['current_split_start']}"
-
-        lbl_title = ctk.CTkLabel(
-            c2, text="CURRENT SPLIT DURATION", font=("Roboto", 10, "bold"), text_color="#777", cursor="hand2"
-        )
-        lbl_title.pack(anchor="w", padx=14, pady=(12, 2))
-        
-        lbl_dur = ctk.CTkLabel(
-            c2, text=split_duration_text, font=("Roboto", 24, "bold"), text_color="white", cursor="hand2"
-        )
-        lbl_dur.pack(anchor="w", padx=14, pady=0)
-        
-        lbl_sub = ctk.CTkLabel(
-            c2, text=split_subtext, font=("Roboto", 11), text_color="#555", cursor="hand2"
-        )
-        lbl_sub.pack(anchor="w", padx=14, pady=(0, 12))
-
-        # Event bindings for Click & Hover highlighting
-        def on_split_click(event):
-            self.show_split_details_popup(stats)
-
-        def on_enter(event):
-            c2.configure(fg_color="#2c2c2e")
-
-        def on_leave(event):
-            c2.configure(fg_color="#1c1c1e")
-
-        for widget in (c2, lbl_title, lbl_dur, lbl_sub):
-            widget.bind("<Button-1>", on_split_click)
-            widget.bind("<Enter>", on_enter)
-            widget.bind("<Leave>", on_leave)
-
-        # Card 3: Last Workout
-        c3 = ctk.CTkFrame(self._stats_panel, **card_p)
-        c3.grid(row=0, column=2, padx=6, pady=2, sticky="nsew")
-
-        latest_date = stats.get("latest_workout_date", "N/A")
-        latest_day = stats.get("latest_workout_day", "N/A")
-        latest_subtext = f"Day {latest_day}" if isinstance(latest_day, int) else str(latest_day)
-
-        ctk.CTkLabel(
-            c3, text="LAST WORKOUT", font=("Roboto", 10, "bold"), text_color="#777"
-        ).pack(anchor="w", padx=14, pady=(12, 2))
-        ctk.CTkLabel(
-            c3, text=latest_date, font=("Roboto", 24, "bold"), text_color="white"
-        ).pack(anchor="w", padx=14, pady=0)
-        ctk.CTkLabel(
-            c3, text=latest_subtext, font=("Roboto", 11), text_color="#555"
-        ).pack(anchor="w", padx=14, pady=(0, 12))
-
-    def show_split_details_popup(self, stats):
-        if not stats:
-            return
-
-        popup = ctk.CTkToplevel(self)
-        popup.title("Current Split Details")
-        popup.geometry("650x550")
-        popup.resizable(False, False)
-        popup.after(100, popup.focus_force)
-        popup.after(100, popup.lift)
-
-        main_frame = ctk.CTkFrame(popup, fg_color="transparent")
-        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
-
-        ctk.CTkLabel(
-            main_frame,
-            text="Current Training Split Details",
-            font=("Roboto", 20, "bold"),
-            text_color="white"
-        ).pack(anchor="w", pady=(0, 10))
-
-        ctk.CTkFrame(main_frame, height=2, fg_color="#2e2e2e").pack(fill="x", pady=(0, 15))
-
-        layout_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        layout_frame.pack(fill="both", expand=True)
-        layout_frame.columnconfigure(0, weight=3)
-        layout_frame.columnconfigure(1, weight=2)
-        layout_frame.rowconfigure(0, weight=1)
-
-        left_col = ctk.CTkFrame(layout_frame, fg_color="transparent")
-        left_col.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-        
-        ctk.CTkLabel(
-            left_col, text="Routine Structure", font=("Roboto", 14, "bold"), text_color="#1565C0"
-        ).pack(anchor="w", pady=(0, 8))
-
-        scroll_left = ctk.CTkScrollableFrame(left_col, fg_color="#121212", border_color="#2e2e2e", border_width=1)
-        scroll_left.pack(fill="both", expand=True)
-
-        split_ex = stats.get("split_days_exercises", {})
-        for day_num in sorted(split_ex.keys()):
-            day_frame = ctk.CTkFrame(scroll_left, fg_color="#1c1c1e", corner_radius=8)
-            day_frame.pack(fill="x", pady=4, padx=2)
-            
-            ctk.CTkLabel(
-                day_frame, text=f"Day {day_num}", font=("Roboto", 12, "bold"), text_color="#DAEEF3"
-            ).pack(anchor="w", padx=12, pady=(8, 2))
-            
-            for ex_name in split_ex[day_num]:
-                ctk.CTkLabel(
-                    day_frame, text=f"• {ex_name}", font=("Roboto", 11), text_color="#bbb"
-                ).pack(anchor="w", padx=20, pady=1)
-            
-            ctk.CTkFrame(day_frame, height=4, fg_color="transparent").pack()
-
-        right_col = ctk.CTkFrame(layout_frame, fg_color="transparent")
-        right_col.grid(row=0, column=1, sticky="nsew", padx=(10, 0))
-
-        ctk.CTkLabel(
-            right_col, text="Sessions History (Skipping Deloads)", font=("Roboto", 14, "bold"), text_color="#6A1B9A"
-        ).pack(anchor="w", pady=(0, 8))
-
-        scroll_right = ctk.CTkScrollableFrame(right_col, fg_color="#121212", border_color="#2e2e2e", border_width=1)
-        scroll_right.pack(fill="both", expand=True)
-
-        dates_history = stats.get("split_sessions_dates", [])
-        for entry in reversed(dates_history):
-            date_str = entry["date"]
-            d_val = entry["day"]
-            lbl_text = f"📅  {date_str}  ·  Day {d_val}"
-            
-            date_frame = ctk.CTkFrame(scroll_right, fg_color="#1c1c1e", height=32)
-            date_frame.pack(fill="x", pady=2, padx=2)
-            date_frame.pack_propagate(False)
-            
-            ctk.CTkLabel(
-                date_frame, text=lbl_text, font=("Roboto", 11), text_color="#ccc"
-            ).pack(side="left", padx=10)
-
-        ctk.CTkFrame(main_frame, height=1, fg_color="#2e2e2e").pack(fill="x", pady=15)
-        
-        footer_frame = ctk.CTkFrame(main_frame, fg_color="transparent")
-        footer_frame.pack(fill="x")
-        
-        summary_text = (
-            f"Active since: {stats['current_split_start']}  •  "
-            f"Duration: {stats['current_split_weeks']:.1f} Weeks  •  "
-            f"Total sessions: {len(dates_history)}"
-        )
-        ctk.CTkLabel(
-            footer_frame, text=summary_text, font=("Roboto", 11, "bold"), text_color="#888"
-        ).pack(side="left")
-
-        ctk.CTkButton(
-            footer_frame,
-            text="Close",
-            width=100,
-            fg_color="#333",
-            hover_color="#444",
-            command=popup.destroy
-        ).pack(side="right")
-
-    def show_exercise_library(self):
-        from core.standards import EXERCISE_STANDARDS
-
-        lib_win = ctk.CTkToplevel(self)
-        lib_win.title("Exercise Library")
-        lib_win.geometry("600x700")
-        lib_win.after(100, lib_win.focus_force)
-        lib_win.after(100, lib_win.lift)
-
-        ctk.CTkLabel(
-            lib_win, text="Search Exercises", font=("Roboto", 18, "bold")
-        ).pack(pady=10)
-
-        search_var = ctk.StringVar()
-        search_entry = ctk.CTkEntry(
-            lib_win, textvariable=search_var, placeholder_text="Type to filter..."
-        )
-        search_entry.pack(fill="x", padx=20, pady=5)
-        lib_win.after(150, search_entry.focus_set)
-
-        count_label = ctk.CTkLabel(
-            lib_win, text="", text_color="gray", font=("Roboto", 11)
-        )
-        count_label.pack()
-
-        scroll_frame = ctk.CTkScrollableFrame(lib_win)
-        scroll_frame.pack(fill="both", expand=True, padx=20, pady=10)
-
-        LIBRARY = sorted(
-            [
-                (slug, info.get("name", slug))
-                for slug, info in EXERCISE_STANDARDS.items()
-            ],
-            key=lambda x: x[1],
-        )
-        MAX_DISPLAY = 50
-
-        def render_results(matches):
-            for w in scroll_frame.winfo_children():
-                w.destroy()
-            shown = matches[:MAX_DISPLAY]
-            for slug, display in shown:
-                row = ctk.CTkFrame(scroll_frame, fg_color="transparent")
-                row.pack(fill="x", pady=2)
-
-                ctk.CTkLabel(row, text=display, font=("Roboto", 13)).pack(
-                    side="left", padx=5
-                )
-                ctk.CTkLabel(
-                    row, text=f"({slug})", font=("Roboto", 11), text_color="gray"
-                ).pack(side="left", padx=5)
-
-                btn_frame = ctk.CTkFrame(row, fg_color="transparent")
-                btn_frame.pack(side="right")
-
-                def copy_to_cb(s=slug):
-                    self.clipboard_clear()
-                    self.clipboard_append(s)
-                    self.set_status(
-                        f"Copied '{s}' to clipboard!", "green", auto_reset_ms=3000
-                    )
-
-                def copy_py_cb(s=slug):
-                    var_name = s.replace("-", "_")
-                    code_str = f'{var_name} = "{s}"'
-                    self.clipboard_clear()
-                    self.clipboard_append(code_str)
-                    self.set_status(
-                        f"Copied '{code_str}' to clipboard!", "green", auto_reset_ms=3000
-                    )
-
-                def open_link(s=slug):
-                    webbrowser.open(f"https://strengthlevel.com/strength-standards/{s}")
-
-                ctk.CTkButton(
-                    btn_frame,
-                    text="Copy ID",
-                    width=60,
-                    height=24,
-                    font=("Roboto", 10),
-                    command=copy_to_cb,
-                ).pack(side="left", padx=2)
-                ctk.CTkButton(
-                    btn_frame,
-                    text="Copy Py",
-                    width=60,
-                    height=24,
-                    font=("Roboto", 10),
-                    fg_color="#27ae60",
-                    command=copy_py_cb,
-                ).pack(side="left", padx=2)
-                ctk.CTkButton(
-                    btn_frame,
-                    text="View",
-                    width=50,
-                    height=24,
-                    font=("Roboto", 10),
-                    fg_color="#34495e",
-                    command=open_link,
-                ).pack(side="left", padx=2)
-
-            total = len(matches)
-            if total > MAX_DISPLAY:
-                count_label.configure(
-                    text=f"Showing {MAX_DISPLAY} of {total} — type to narrow results"
-                )
-            elif total == len(LIBRARY):
-                count_label.configure(text=f"{total} exercises total")
-            else:
-                count_label.configure(text=f"{total} result{'s' if total != 1 else ''}")
-
-        _debounce_id = [None]
-
-        def update_list(*args):
-            if _debounce_id[0] is not None:
-                lib_win.after_cancel(_debounce_id[0])
-
-            def do_search():
-                _debounce_id[0] = None
-                query = search_var.get().lower().strip()
-                if query:
-                    matches = [
-                        (s, d)
-                        for s, d in LIBRARY
-                        if query in s.lower() or query in d.lower()
-                    ]
-                else:
-                    matches = LIBRARY
-                render_results(matches)
-
-            _debounce_id[0] = lib_win.after(250, do_search)
-
-        search_var.trace_add("write", update_list)
-        render_results(LIBRARY)
-
-    # -------------------------------------------------------------------------
-    # Core actions
-    # -------------------------------------------------------------------------
-    def run_log_generator(self):
+    def get_exercise_standards_table(self, exercise_id: str) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
-        self.set_status("Generating log...", "white")
+        sex = getattr(p, "sex", "male") if p else "male"
+        mass = getattr(p, "mass", 80.0) if p else 80.0
+        standards = get_tiered_standards(exercise_id, sex, None)
+        target_bm = int(mass / 5.0) * 5 if mass else 80
+        name = EXERCISE_STANDARDS.get(exercise_id, {}).get("name", exercise_id)
+        return {
+            "exercise_id": exercise_id,
+            "name": name,
+            "target_bm": target_bm,
+            "standards": standards or {},
+        }
 
-        if p.sessions_dir not in sys.path:
-            sys.path.insert(0, p.sessions_dir)
-
-        try:
-            import sessions
-
-            importlib.reload(sessions)
-
-            # Multi-User Safety Check
-            owner = getattr(sessions, "SESSIONS_OWNER", None)
-            if owner and owner.strip().lower() != p.name.strip().lower():
-                msg = (
-                    f"WARNING: 'SESSIONS_OWNER' in sessions.py is '{owner}', "
-                    f"but current profile is '{p.name}'.\n\nContinue anyway?"
-                )
-                if not messagebox.askyesno("Profile Mismatch", msg):
-                    self.set_status(
-                        "Aborted: Profile mismatch.", "orange", auto_reset_ms=5000
-                    )
-                    return
-
-            self.set_status("⏳ Generating Excel report in background...", "#90caf9")
-
-            def generate_task():
-                try:
-                    timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
-                    os.makedirs(p.output_dir, exist_ok=True)
-                    filename = os.path.join(p.output_dir, f"Training_Log_{timestamp}.xlsx")
-
-                    processor = TrainingLogProcessor(
-                        filename,
-                        sessions.EXERCISE_REGISTRY,
-                        sessions.USER_DATA,
-                        sessions.BODYMASS_LOG,
-                        p.to_dict(),
-                    )
-
-                    try:
-                        processor.validate_data()
-                    except ValueError as ve:
-                        def _err(err_msg=str(ve)):
-                            self.set_status("Generation Failed: Data Mismatch", "red", auto_reset_ms=8000)
-                            messagebox.showerror("Data Error", err_msg)
-                        self.after(0, _err)
-                        return
-
-                    processor.write_headers()
-                    processor.process_data(sessions.USER_DATA)
-                    processor.write_calculations()
-                    processor.generate_charts()
-                    processor.write_definitions()
-                    processor.write_personal_records()
-                    processor.write_user_profile()
-                    processor.save()
-
-                    def _success():
-                        self.last_generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
-                        if hasattr(self, "last_gen_label"):
-                            self.last_gen_label.configure(
-                                text=f"Last generated: {self.last_generated_at}"
-                            )
-                        self.set_status(
-                            "✅ Success! Excel log created.", "#4caf50", auto_reset_ms=8000
-                        )
-                        try:
-                            os.startfile(filename)
-                        except Exception:
-                            pass
-
-                    self.after(0, _success)
-
-                except Exception as e:
-                    def _fail(err_msg=str(e)):
-                        self.set_status(f"Error: {err_msg}", "red", auto_reset_ms=8000)
-                    self.after(0, _fail)
-
-            threading.Thread(target=generate_task, daemon=True).start()
-
-        except Exception as e:
-            self.set_status(f"Error: {str(e)}", "red", auto_reset_ms=8000)
-
-    def run_plan_generator(self):
-        p = self.manager.get_active_profile()
-        file_path = os.path.join(p.sessions_dir, "sessions.py")
-        if not os.path.exists(file_path):
-            messagebox.showerror("Error", f"sessions.py not found in {p.sessions_dir}")
-            return
-
-        # Load sessions module to inspect Day data
-        sess = self._try_load_sessions(p)
-        if sess is None:
-            messagebox.showerror("Error", "Could not load sessions.py")
-            return
-
-        from core.plan_generator import days_to_generate, detect_cycle
-
-        user_data = sess.USER_DATA
-
-        # Check if the very last session is a special (string) day value
-        sorted_dates = sorted(user_data.keys())
-        last_day_obj = None
-        if sorted_dates:
-            last_session = user_data[sorted_dates[-1]]
-            v = last_session.get("day")
-            last_day_obj = v if isinstance(v, (int, str)) else None
-
-        if isinstance(last_day_obj, str):
-            # State 2: string day ("PR", "small PR", etc.) — prompt to configure a new cycle
-            if messagebox.askyesno(
-                "New Cycle",
-                f"Last session was a '{last_day_obj}' session.\n"
-                "Would you like to build a new N-Day cycle now?",
-            ):
-                self._launch_post_pr_builder(p, file_path)
-            return
-
-        N, last_day_int = detect_cycle(user_data)
-
-        if N is None:
-            # State 3: cycle length unknown — too few data
-            messagebox.showinfo(
-                "Cycle Unknown",
-                "Could not detect your split cycle yet.\n"
-                "Complete at least one full cycle (all Day values returning to Day 1) "
-                "before using 'Plan Next Cycle'.",
-            )
-            return
-
-        day_nums = days_to_generate(N, last_day_int)
-        if not day_nums:
-            messagebox.showinfo(
-                "Nothing to add", "All days in the current cycle are already planned."
-            )
-            return
-
-        # State 1: normal cycle planning mode
-        try:
-            from core.plan_generator import build_planned_sessions
-
-            planned = build_planned_sessions(file_path, day_nums)
-        except Exception as e:
-            messagebox.showerror("Plan Build Error", str(e))
-            return
-
-        if last_day_int >= N:
-            why = f"Starting new cycle — all {N} days"
-        else:
-            days_str = ", ".join(f"Day {d}" for d in day_nums)
-            why = f"Completing cycle of {N} — generating {days_str}"
-
-        dialog = DynamicPlanDialog(
-            self,
-            file_path,
-            p,
-            start_planned=planned,
-            title=f"Plan Next Cycle ({why})",
-            mode="normal",
-        )
-        self.wait_window(dialog)
-
-        if dialog.confirmed:
-            # Refresh recent sessions panel
-            threading.Thread(target=self._load_recent_sessions, daemon=True).start()
-            self.set_status(
-                f"✅ Added {len(planned)} session(s)", "#4caf50", auto_reset_ms=5000
-            )
-
-    def _launch_post_pr_builder(self, p, sessions_file):
-        from core.plan_generator import build_planned_sessions, detect_cycle
-
-        sess = self._try_load_sessions(p)
-        if sess is None:
-            return
-
-        N, last_day_int = detect_cycle(sess.USER_DATA)
-        if N is None:
-            N = 3
-        days_to_plan = list(range(1, N + 1))
-        try:
-            planned = build_planned_sessions(sessions_file, days_to_plan)
-        except Exception:
-            planned = None
-
-        dialog = DynamicPlanDialog(
-            self,
-            sessions_file,
-            p,
-            start_planned=planned,
-            title="Configure New Split",
-            mode="post_pr",
-        )
-        self.wait_window(dialog)
-
-    # -------------------------------------------------------------------------
-    # Experimental features
-    # -------------------------------------------------------------------------
-    def _load_sessions(self, p) -> object | None:
-        """Helper: ensure sessions_dir is on sys.path, reload sessions module.
-        Returns the module or None on failure (shows error dialog itself)."""
-        if p.sessions_dir not in sys.path:
-            sys.path.insert(0, p.sessions_dir)
-        try:
-            import sessions
-
-            importlib.reload(sessions)
-            return sessions
-        except Exception as e:
-            messagebox.showerror("Import Error", f"Could not load sessions.py:\n{e}")
-            return None
-
-    def run_validate_sessions(self):
-        """Run the data-integrity check on sessions.py without generating Excel."""
+    def generate_excel(self) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
         if not p:
-            messagebox.showerror("Error", "No active profile.")
-            return
+            return {"success": False, "error": "No profile"}
 
-        file_path = os.path.join(p.sessions_dir, "sessions.py")
-        if not os.path.exists(file_path):
-            messagebox.showerror("Error", f"sessions.py not found in {p.sessions_dir}")
-            return
+        sess, _ = self._load_sessions(p)
+        if not sess:
+            return {"success": False, "error": "Could not load sessions.py"}
 
-        self.set_status("Validating sessions.py…", "white")
-
-        sessions = self._load_sessions(p)
-        if sessions is None:
-            self.set_status(
-                "Validation failed: import error", "red", auto_reset_ms=6000
+        try:
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
+            filename = os.path.join(p.output_dir, f"Training_Log_{timestamp}.xlsx")
+            processor = TrainingLogProcessor(
+                filename,
+                sess.EXERCISE_REGISTRY,
+                sess.USER_DATA,
+                sess.BODYMASS_LOG,
+                p.to_dict(),
             )
-            return
+            processor.validate_data()
+            processor.write_headers()
+            processor.process_data(sess.USER_DATA)
+            processor.write_calculations()
+            processor.generate_charts()
+            processor.write_definitions()
+            processor.write_personal_records()
+            processor.write_user_profile()
+            processor.save()
 
-        # Open a throw-away workbook just to run validate_data()
+            self.last_gen_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+            try:
+                os.startfile(filename)
+            except Exception:
+                pass
+
+            return {"success": True, "time": self.last_gen_time}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def run_scraper(self) -> Dict[str, Any]:
+        script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "batch_scraper.py"))
+        try:
+            subprocess.Popen([sys.executable, script_path])
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def run_validate_sessions(self) -> Dict[str, Any]:
+        p = self.manager.get_active_profile()
+        if not p:
+            return {"success": False, "error": "No active profile"}
+        sess, _ = self._load_sessions(p)
+        if not sess:
+            return {"success": False, "error": "Could not load sessions.py"}
+
         dummy_path = os.path.join(tempfile.gettempdir(), "_ironlog_validate_dummy.xlsx")
         try:
             processor = TrainingLogProcessor(
                 dummy_path,
-                sessions.EXERCISE_REGISTRY,
-                sessions.USER_DATA,
-                sessions.BODYMASS_LOG,
+                sess.EXERCISE_REGISTRY,
+                sess.USER_DATA,
+                sess.BODYMASS_LOG,
                 p.to_dict(),
             )
             processor.validate_data()
 
-            # Also report None-mass entries as a useful warning
             date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
             none_mass_dates = [
-                d
-                for d, v in sessions.BODYMASS_LOG.items()
-                if date_pattern.match(d)
-                and isinstance(v, dict)
-                and v.get("mass") is None
+                d for d, v in getattr(sess, "BODYMASS_LOG", {}).items()
+                if date_pattern.match(d) and isinstance(v, dict) and v.get("mass") is None
             ]
 
-            # Clean up the dummy workbook without persisting it
             try:
                 processor.wb.close()
             except Exception:
@@ -1844,1154 +2142,286 @@ class IronLogApp(ctk.CTk):
             except Exception:
                 pass
 
-            msg = "✅ sessions.py is valid! No data mismatches found."
-            if none_mass_dates:
-                msg += (
-                    f"\n\n⚠️  {len(none_mass_dates)} BODYMASS_LOG "
-                    f"entr{'y' if len(none_mass_dates) == 1 else 'ies'} "
-                    f"still have mass=None:\n"
-                )
-                msg += "\n".join(f"  • {d}" for d in none_mass_dates)
-                msg += (
-                    "\n\nUse 🧪 Experimental → Fill-in Missing Masses to complete them."
-                )
-
-            messagebox.showinfo("Validation Result", msg)
-            self.set_status("✅ Validation passed", "green", auto_reset_ms=5000)
-
+            return {
+                "success": True,
+                "message": "sessions.py is valid! No data mismatches found.",
+                "none_mass_dates": none_mass_dates,
+            }
         except ValueError as ve:
-            self.set_status("❌ Validation failed", "red", auto_reset_ms=8000)
-            messagebox.showerror("Validation Failed", str(ve))
             try:
                 os.remove(dummy_path)
             except Exception:
                 pass
+            return {"success": False, "error": f"Validation Failed: {ve}"}
         except Exception as e:
-            self.set_status("Validation error", "red", auto_reset_ms=6000)
-            messagebox.showerror("Unexpected Error", str(e))
+            try:
+                os.remove(dummy_path)
+            except Exception:
+                pass
+            return {"success": False, "error": f"Unexpected error: {e}"}
 
-    def run_bodymass_prefill(self):
-        """Scan USER_DATA for real YYYY-MM-DD dates missing from BODYMASS_LOG
-        and append them with {"mass": None} as placeholders."""
+    def run_bodymass_prefill(self) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
         if not p:
-            messagebox.showerror("Error", "No active profile.")
-            return
+            return {"success": False, "error": "No active profile"}
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
+        if not os.path.exists(sessions_file):
+            return {"success": False, "error": f"sessions.py not found at {sessions_file}"}
 
-        file_path = os.path.join(p.sessions_dir, "sessions.py")
-        if not os.path.exists(file_path):
-            messagebox.showerror("Error", f"sessions.py not found in {p.sessions_dir}")
-            return
-
-        self.set_status("Scanning sessions.py…", "white")
-
-        sessions = self._load_sessions(p)
-        if sessions is None:
-            self.set_status("Error loading sessions.py", "red", auto_reset_ms=6000)
-            return
+        sess, _ = self._load_sessions(p)
+        if not sess:
+            return {"success": False, "error": "Could not load sessions.py"}
 
         date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-        user_dates = {k for k in sessions.USER_DATA.keys() if date_pattern.match(k)}
-        existing_dates = set(sessions.BODYMASS_LOG.keys())
+        user_dates = {k for k in getattr(sess, "USER_DATA", {}).keys() if date_pattern.match(k)}
+        existing_dates = set(getattr(sess, "BODYMASS_LOG", {}).keys())
         missing = sorted(user_dates - existing_dates)
 
         if not missing:
-            self.set_status(
-                "All dates already in BODYMASS_LOG.", "gray", auto_reset_ms=4000
-            )
-            messagebox.showinfo(
-                "Up to Date",
-                "All USER_DATA dates are already in BODYMASS_LOG. Nothing to add.",
-            )
-            return
+            return {"success": True, "count": 0, "message": "All workout dates are already present in BODYMASS_LOG."}
 
-        date_list = "\n".join(f"  {d}" for d in missing)
-        confirm = messagebox.askyesno(
-            "Prefill Mass Dates",
-            f"The following {len(missing)} date(s) will be added to BODYMASS_LOG "
-            f'with {{"mass": None}}:\n\n{date_list}\n\nProceed?',
-        )
-        if not confirm:
-            self.set_status("Prefill cancelled.", "gray", auto_reset_ms=3000)
-            return
+        with open(sessions_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
 
-        with open(file_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()  # preserve line endings
-
-        start_line = next(
-            (i for i, ln in enumerate(lines) if ln.startswith("BODYMASS_LOG = {")), -1
-        )
+        start_line = next((i for i, ln in enumerate(lines) if ln.startswith("BODYMASS_LOG = {")), -1)
         if start_line == -1:
-            messagebox.showerror(
-                "Error", "Could not locate BODYMASS_LOG in sessions.py"
-            )
-            self.set_status("Error: BODYMASS_LOG not found", "red", auto_reset_ms=6000)
-            return
+            return {"success": False, "error": "Could not locate BODYMASS_LOG in sessions.py"}
 
-        close_line = next(
-            (
-                i
-                for i in range(start_line + 1, len(lines))
-                if lines[i].rstrip("\r\n") == "}"
-            ),
-            -1,
-        )
+        close_line = next((i for i in range(start_line + 1, len(lines)) if lines[i].rstrip("\r\n") == "}"), -1)
         if close_line == -1:
-            messagebox.showerror(
-                "Error", "Could not find closing brace of BODYMASS_LOG"
-            )
-            self.set_status("Error: parse failed", "red", auto_reset_ms=6000)
-            return
+            return {"success": False, "error": "Could not find closing brace of BODYMASS_LOG"}
 
         insert_text = "".join(f'    "{d}": {{"mass": None}},\n' for d in missing)
         new_lines = lines[:close_line] + [insert_text] + lines[close_line:]
 
-        with open(file_path, "w", encoding="utf-8") as f:
+        with open(sessions_file, "w", encoding="utf-8") as f:
             f.writelines(new_lines)
 
-        self.set_status(
-            f"✅ Added {len(missing)} date(s) to BODYMASS_LOG.",
-            "green",
-            auto_reset_ms=6000,
-        )
-        messagebox.showinfo(
-            "Done",
-            f"Successfully added {len(missing)} date(s) to BODYMASS_LOG in sessions.py.\n\n"
-            f"Use 🧪 Experimental → Fill-in Missing Masses to enter the actual values.",
-        )
+        return {"success": True, "count": len(missing), "dates": missing}
 
-    def run_mass_fillin_dialog(self):
-        """Show a dialog to fill in BODYMASS_LOG entries where mass is None."""
+    def get_missing_masses(self) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
         if not p:
-            messagebox.showerror("Error", "No active profile.")
-            return
-
-        file_path = os.path.join(p.sessions_dir, "sessions.py")
-        if not os.path.exists(file_path):
-            messagebox.showerror("Error", f"sessions.py not found in {p.sessions_dir}")
-            return
-
-        sessions = self._load_sessions(p)
-        if sessions is None:
-            return
+            return {"success": False, "error": "No active profile"}
+        sess, _ = self._load_sessions(p)
+        if not sess:
+            return {"success": False, "error": "Could not load sessions.py"}
 
         date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-        none_entries = sorted(
-            [
-                d
-                for d, v in sessions.BODYMASS_LOG.items()
-                if date_pattern.match(d)
-                and isinstance(v, dict)
-                and v.get("mass") is None
-            ]
-        )
+        none_entries = sorted([
+            d for d, v in getattr(sess, "BODYMASS_LOG", {}).items()
+            if date_pattern.match(d) and isinstance(v, dict) and v.get("mass") is None
+        ])
+        return {"success": True, "entries": none_entries}
 
-        if not none_entries:
-            messagebox.showinfo(
-                "All Done", "No missing mass entries in BODYMASS_LOG! 🎉"
-            )
-            self.set_status("No missing masses to fill.", "green", auto_reset_ms=4000)
-            return
-
-        # Build the fill-in dialog
-        win = ctk.CTkToplevel(self)
-        win.title("Fill-in Missing Masses")
-        win.geometry("380x520")
-        win.attributes("-topmost", True)
-        win.after(100, win.focus_force)
-
-        ctk.CTkLabel(
-            win, text="Fill-in Missing Body Mass Values", font=("Roboto", 15, "bold")
-        ).pack(pady=(15, 2))
-        ctk.CTkLabel(
-            win,
-            text="Leave blank to keep as None",
-            font=("Roboto", 11),
-            text_color="gray",
-        ).pack(pady=(0, 5))
-
-        scroll = ctk.CTkScrollableFrame(win)
-        scroll.pack(fill="both", expand=True, padx=15, pady=5)
-
-        field_map: dict[str, ctk.CTkEntry] = {}
-        for date_str in none_entries:
-            row = ctk.CTkFrame(scroll, fg_color="transparent")
-            row.pack(fill="x", pady=3)
-            ctk.CTkLabel(
-                row, text=date_str, font=("Roboto", 13), width=110, anchor="w"
-            ).pack(side="left", padx=5)
-            entry = ctk.CTkEntry(row, placeholder_text="e.g. 83.5", width=150)
-            entry.pack(side="left", padx=5)
-            ctk.CTkLabel(row, text="kg", font=("Roboto", 12), text_color="gray").pack(
-                side="left"
-            )
-            field_map[date_str] = entry
-
-        def save_masses():
-            updates: dict[str, float] = {}
-            for date_str, entry in field_map.items():
-                val_str = entry.get().strip()
-                if not val_str:
-                    continue
-                try:
-                    updates[date_str] = float(val_str)
-                except ValueError:
-                    messagebox.showerror(
-                        "Invalid Input",
-                        f"'{val_str}' is not a valid number for {date_str}.",
-                    )
-                    return
-
-            if not updates:
-                messagebox.showinfo("Nothing to Save", "No values were entered.")
-                return
-
-            with open(file_path, "r", encoding="utf-8") as f:
-                source = f.read()
-
-            for date_str, val in updates.items():
-                # Exact match first (format guaranteed by prefill)
-                old = f'"{date_str}": {{"mass": None}}'
-                new = f'"{date_str}": {{"mass": {val}}}'
-                if old in source:
-                    source = source.replace(old, new, 1)
-                else:
-                    # Fallback: handle any whitespace variation
-                    source = re.sub(
-                        rf'("{re.escape(date_str)}")\s*:\s*\{{"mass"\s*:\s*None\}}',
-                        rf'\1: {{"mass": {val}}}',
-                        source,
-                    )
-
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write(source)
-
-            win.destroy()
-            self.set_status(
-                f"✅ Saved {len(updates)} mass value(s).", "green", auto_reset_ms=6000
-            )
-            messagebox.showinfo(
-                "Saved", f"Updated {len(updates)} mass value(s) in sessions.py."
-            )
-
-        ctk.CTkButton(
-            win, text="💾 Save Mass Values", fg_color="green", command=save_masses
-        ).pack(pady=(5, 3), padx=15, fill="x")
-        ctk.CTkButton(win, text="Cancel", fg_color="gray", command=win.destroy).pack(
-            pady=(0, 15), padx=15, fill="x"
-        )
-
-    # -------------------------------------------------------------------------
-    # Other actions
-    # -------------------------------------------------------------------------
-    def open_latest_excel(self):
-        """Open the most recently modified Training_Log_*.xlsx in the output folder."""
+    def save_missing_masses(self, updates: Dict[str, float]) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
-        if not p or not os.path.exists(p.output_dir):
-            messagebox.showwarning(
-                "Not Found",
-                f"Output folder does not exist:\n{p.output_dir if p else '(no profile)'}",
-            )
-            self.set_status("Output folder not found.", "orange", auto_reset_ms=4000)
-            return
+        if not p:
+            return {"success": False, "error": "No active profile"}
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
+        if not os.path.exists(sessions_file):
+            return {"success": False, "error": "sessions.py not found"}
 
-        pattern = os.path.join(p.output_dir, "Training_Log_*.xlsx")
-        matches = glob.glob(pattern)
-        if not matches:
-            messagebox.showwarning(
-                "Not Found", f"No Training_Log_*.xlsx files found in:\n{p.output_dir}"
-            )
-            self.set_status("No Excel logs found.", "orange", auto_reset_ms=4000)
-            return
+        with open(sessions_file, "r", encoding="utf-8") as f:
+            source = f.read()
 
-        latest = max(matches, key=os.path.getmtime)
-        self.set_status(
-            f"Opening {os.path.basename(latest)}", "gray", auto_reset_ms=3000
-        )
-        os.startfile(latest)
+        count = 0
+        for date_str, val in updates.items():
+            old = f'"{date_str}": {{"mass": None}}'
+            new = f'"{date_str}": {{"mass": {val}}}'
+            if old in source:
+                source = source.replace(old, new, 1)
+                count += 1
+            else:
+                subbed, n = re.subn(
+                    rf'("{re.escape(date_str)}")\s*:\s*\{{"mass"\s*:\s*None\}}',
+                    rf'\1: {{"mass": {val}}}',
+                    source,
+                )
+                if n > 0:
+                    source = subbed
+                    count += n
 
-    def run_scraper(self):
-        self.set_status("Scraping started (check console if needed)…", "white")
-        script_path = os.path.join(
-            os.path.dirname(__file__), "..", "scripts", "batch_scraper.py"
-        )
+        with open(sessions_file, "w", encoding="utf-8") as f:
+            f.write(source)
+
+        return {"success": True, "count": count}
+
+    def get_plan(self) -> Dict[str, Any]:
+        p = self.manager.get_active_profile()
+        if not p:
+            return {"success": False, "error": "No profile"}
+
+        sess, file_path = self._load_sessions(p)
+        if not sess:
+            return {"success": False, "error": "Could not load sessions.py"}
+
+        user_data = getattr(sess, "USER_DATA", {})
+        N, last_day_int = detect_cycle(user_data)
+        if N is None:
+            return {"success": False, "error": "Could not detect your split cycle yet."}
+
+        day_nums = days_to_generate(N, last_day_int)
+        if not day_nums:
+            return {"success": False, "error": "All days in current cycle are already planned."}
+
         try:
-            subprocess.Popen([sys.executable, script_path])
+            planned = build_planned_sessions(file_path, day_nums)
+            why = f"Starting new cycle — all {N} days" if (last_day_int or 0) >= N else f"Completing cycle of {N}"
+            serializable_plan = [
+                {
+                    "day_num": ps.day_number,
+                    "date_str": ps.date_str,
+                    "exercises": [
+                        {
+                            "var_name": ex.var_name,
+                            "display_name": getattr(ex, "display_name", ex.var_name),
+                            "sets": ex.sets,
+                            "reps": ex.reps,
+                            "mass": ex.mass,
+                            "comment": ex.comment,
+                        }
+                        for ex in ps.exercises
+                    ],
+                }
+                for ps in planned
+            ]
+            return {"success": True, "planned": serializable_plan, "why": why}
         except Exception as e:
-            self.set_status(f"Scraper Failed: {e}", "red", auto_reset_ms=6000)
+            return {"success": False, "error": str(e)}
+
+    def save_plan(self, planned_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        p = self.manager.get_active_profile()
+        if not p:
+            return {"success": False, "error": "No profile"}
+
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
+        try:
+            planned_objs = []
+            for d in planned_data:
+                ex_objs = [
+                    PlannedExercise(
+                        var_name=e.get("var_name", "exercise"),
+                        display_name=e.get("display_name", e.get("var_name", "exercise")),
+                        sets=int(e.get("sets", 3)),
+                        reps=str(e.get("reps", "5")),
+                        mass=str(e.get("mass", "0")),
+                        comment=str(e.get("comment", "")),
+                    )
+                    for e in d.get("exercises", [])
+                ]
+                planned_objs.append(
+                    PlannedSession(day_number=int(d.get("day_num", 1)), date_str=d.get("date_str", ""), exercises=ex_objs)
+                )
+
+            write_planned_sessions(sessions_file, planned_objs)
+
+            # Close standalone planner window if open
+            global _PLANNER_WINDOW, _MAIN_WINDOW
+            if _PLANNER_WINDOW:
+                try:
+                    _PLANNER_WINDOW.destroy()
+                    _PLANNER_WINDOW = None
+                except Exception:
+                    pass
+
+            # Trigger reload in main window
+            if _MAIN_WINDOW:
+                try:
+                    _MAIN_WINDOW.evaluate_js("loadDashboard();")
+                except Exception:
+                    pass
+
+            return {"success": True}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def search_standards(self, query: str) -> List[Dict[str, Any]]:
+        p = self.manager.get_active_profile()
+        sex = getattr(p, "sex", "male") if p else "male"
+        mass = getattr(p, "mass", 80.0) if p else 80.0
+
+        q = (query or "").strip().lower()
+        results = []
+        target_bm = int(mass / 5.0) * 5
+
+        for slug, info in EXERCISE_STANDARDS.items():
+            name = info.get("name", slug)
+            if q and (q not in name.lower() and q not in slug.lower()):
+                continue
+
+            standards = get_tiered_standards(slug, sex, mass)
+            levels = standards.get(target_bm, {}) if standards else {}
+
+            results.append({
+                "slug": slug,
+                "name": name,
+                "beg": levels.get("Beginner", "-"),
+                "nov": levels.get("Novice", "-"),
+                "int": levels.get("Intermediate", "-"),
+                "adv": levels.get("Advanced", "-"),
+                "eli": levels.get("Elite", "-"),
+            })
+        return results
+
+    def copy_clipboard(self, text: str):
+        import tkinter as tk
+        r = tk.Tk()
+        r.withdraw()
+        r.clipboard_clear()
+        r.clipboard_append(text)
+        r.update()
+        r.destroy()
+
+    def open_url(self, url: str):
+        webbrowser.open(url)
+
+    def open_latest_excel(self):
+        p = self.manager.get_active_profile()
+        if p and p.output_dir and os.path.exists(p.output_dir):
+            files = sorted(glob.glob(os.path.join(p.output_dir, "Training_Log_*.xlsx")), reverse=True)
+            if files:
+                os.startfile(files[0])
 
     def edit_sessions(self):
         p = self.manager.get_active_profile()
-        file_path = os.path.join(p.sessions_dir, "sessions.py")
-        if os.path.exists(file_path):
-            os.startfile(file_path)
-        else:
-            self.set_status(
-                "sessions.py not found in selected directory", "red", auto_reset_ms=5000
-            )
+        if p and p.sessions_dir:
+            f = os.path.join(p.sessions_dir, "sessions.py")
+            if os.path.exists(f):
+                os.startfile(f)
 
     def open_output(self):
         p = self.manager.get_active_profile()
-        if os.path.exists(p.output_dir):
+        if p and p.output_dir and os.path.exists(p.output_dir):
             os.startfile(p.output_dir)
 
     def open_app_data_folder(self):
-        """Opens the directory where config.json and profiles.json are stored"""
         if getattr(sys, "frozen", False):
-            path = os.path.join(
-                os.environ.get("APPDATA", os.path.expanduser("~")), "IronLog"
-            )
+            path = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "IronLog")
         else:
             path = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-
         os.makedirs(path, exist_ok=True)
         os.startfile(path)
 
 
-# =============================================================================
-# Dynamic Plan Dialog
-# =============================================================================
-
-
-class DynamicPlanDialog(ctk.CTkToplevel):
-    """Dynamically build an N-Day split from scratch or edit a generated cycle layout."""
-
-    def __init__(
-        self,
-        parent,
-        file_path: str,
-        profile,
-        start_planned=None,
-        title="Split Builder",
-        mode="initial",
-        profile_is_edit=False,
-        profile_index=None,
-    ):
-        super().__init__(parent)
-        self.withdraw()  # Fast single-pass rendering: hide until fully constructed
-        self.title(title)
-        self.geometry("980x700")
-        self.minsize(980, 500)
-
-        self.confirmed = False
-
-        self._parent_app = parent
-        self._file_path = file_path
-        self._profile = profile
-        self._mode = mode  # 'initial', 'post_pr', 'normal'
-        self._profile_is_edit = profile_is_edit
-        self._profile_index = profile_index
-
-        import copy
-
-        from core.plan_generator import PlannedSession
-
-        # Default to 3 days if completely empty
-        if start_planned:
-            self._planned = copy.deepcopy(start_planned)
-        else:
-            now = datetime.now()
-            self._planned = [
-                PlannedSession(day_number=1, date_str=now.strftime("%Y-%m-%d"), exercises=[]),
-                PlannedSession(day_number=2, date_str=(now + timedelta(days=2)).strftime("%Y-%m-%d"), exercises=[]),
-                PlannedSession(day_number=3, date_str=(now + timedelta(days=4)).strftime("%Y-%m-%d"), exercises=[]),
-            ]
-
-        self._widgets = []
-        self._date_vars = []
-
-        self._main_container = ctk.CTkFrame(self, fg_color="transparent")
-        self._main_container.pack(fill="both", expand=True)
-
-        self.scroll = ctk.CTkScrollableFrame(
-            self._main_container, fg_color="transparent"
-        )
-        self.scroll.pack(fill="both", expand=True, padx=12, pady=8)
-
-        # Footer
-        footer = ctk.CTkFrame(self, fg_color="#111", corner_radius=0)
-        footer.pack(fill="x", side="bottom")
-
-        ctk.CTkButton(
-            footer,
-            text="Cancel",
-            width=110,
-            fg_color="#333",
-            hover_color="#444",
-            command=self.destroy,
-        ).pack(side="left", padx=16, pady=12)
-
-        ctk.CTkButton(
-            footer,
-            text="+ Add Day",
-            width=110,
-            fg_color="#6A1B9A",
-            hover_color="#7B1FA2",
-            command=self._add_day,
-        ).pack(side="left", padx=16, pady=12)
-
-        def _handle_experimental(val):
-            if val == "Deload Next Cycle":
-                self._prompt_deload()
-            elif val == "Restore from Pre-Deload":
-                self._prompt_restore_pre_deload()
-            # Reset the menu title
-            self.after(100, lambda: exp_menu.set("🧪 Experimental"))
-
-        exp_menu = ctk.CTkOptionMenu(
-            footer,
-            values=["Deload Next Cycle", "Restore from Pre-Deload"],
-            command=_handle_experimental,
-            font=("Roboto", 13),
-            fg_color="#333",
-            button_color="#444",
-            button_hover_color="#555",
-            dropdown_font=("Roboto", 12),
-            width=160
-        )
-        exp_menu.set("🧪 Experimental")
-        exp_menu.pack(side="left", padx=16, pady=12)
-
-        save_btn_text = (
-            "✅ Save Split"
-            if self._mode in ["initial", "post_pr"]
-            else "✅ Write to sessions.py"
-        )
-        ctk.CTkButton(
-            footer,
-            text=save_btn_text,
-            width=200,
-            fg_color="#1B5E20",
-            hover_color="#2E7D32",
-            font=("Roboto", 13, "bold"),
-            command=self._on_confirm,
-        ).pack(side="right", padx=16, pady=12)
-
-        from core.standards import EXERCISE_STANDARDS
-
-        self._standards = EXERCISE_STANDARDS
-
-        self._build_content()
-
-        # Reveal pre-rendered dialog instantly
-        self.update_idletasks()
-        self.deiconify()
-        self.grab_set()
-        self.focus_force()
-
-    def _prompt_deload(self):
-        dialog = ctk.CTkInputDialog(text="Enter deload percentage (e.g., 10 for 10%):", title="Deload")
-        val = dialog.get_input()
-        if val is None:
-            return
-        try:
-            percent = float(val)
-            if percent <= 0 or percent >= 100:
-                messagebox.showerror("Error", "Percentage must be between 0 and 100")
-                return
-        except ValueError:
-            messagebox.showerror("Error", "Invalid number")
-            return
-            
-        self._save_state()
-        
-        factor = 1.0 - (percent / 100.0)
-        for ps in self._planned:
-            for ex in ps.exercises:
-                try:
-                    current_mass = float(ex.mass)
-                    if current_mass > 0:
-                        new_mass = current_mass * factor
-                        # round to nearest 2.5
-                        new_mass = round(new_mass / 2.5) * 2.5
-                        ex.mass = f"{new_mass:g}"
-                        if ex.comment:
-                            ex.comment += f" | {percent:g}% decreased deload"
-                        else:
-                            ex.comment = f"{percent:g}% decreased deload"
-                except ValueError:
-                    pass
-        
-        # Update UI StringVars in-place without rebuilding window
-        for (
-            ps_w,
-            ex_w,
-            row_frame,
-            name_str,
-            sets_v,
-            reps_v,
-            mass_v,
-            comment_v,
-        ) in self._widgets:
-            if row_frame.winfo_exists():
-                mass_v.set(ex_w.mass)
-                comment_v.set(ex_w.comment)
-
-    def _prompt_restore_pre_deload(self):
-        """Rebuild the plan from the last non-deload cycle at full (100%) weight.
-        The user can then apply a deload via 'Deload Next Cycle' if desired."""
-        self._save_state()
-
-        day_numbers = [ps.day_number for ps in self._planned]
-        try:
-            from core.plan_generator import build_pre_deload_baseline
-
-            new_planned = build_pre_deload_baseline(
-                self._file_path, day_numbers, 100.0
-            )
-        except Exception as e:
-            messagebox.showerror("Error", f"Could not read pre-deload sessions:\n{e}")
-            return
-
-        # Check we actually found baseline data
-        total_exercises = sum(len(ps.exercises) for ps in new_planned)
-        if total_exercises == 0:
-            messagebox.showwarning(
-                "Nothing Found",
-                "No pre-deload sessions were found in sessions.py.\n"
-                "Make sure your normal sessions have no 'deload' in their comments.",
-            )
-            return
-
-        # Preserve dates the user may have already edited
-        for orig, fresh in zip(self._planned, new_planned):
-            fresh.date_str = orig.date_str
-
-        self._planned = new_planned
-        self._build_content()
-
-    def _remove_day(self, index):
-        self._save_state()
-        if 0 <= index < len(self._planned):
-            self._planned.pop(index)
-            # Re-number remaining days
-            for i, ps in enumerate(self._planned):
-                ps.day_number = i + 1
-            self._build_content()
-
-    def _add_day(self):
-        self._save_state()
-        from core.plan_generator import PlannedSession
-
-        dn = len(self._planned) + 1
-        # Generate a YYYY-MM placeholder with literal "DD" so the user is forced
-        # to fill in the exact date before saving — prevents accidental duplicates.
-        now = datetime.now()
-        placeholder_date = now.strftime("%Y-%m-DD")
-        self._planned.append(
-            PlannedSession(day_number=dn, date_str=placeholder_date, exercises=[])
-        )
-        self._build_content()
-
-    def _save_state(self):
-        for (
-            ps,
-            ex,
-            row_frame,
-            name_str,
-            sets_v,
-            reps_v,
-            mass_v,
-            comment_v,
-        ) in self._widgets:
-            if not row_frame.winfo_exists():
-                continue
-            ex.var_name = name_str.get().strip()
-            try:
-                ex.sets = max(1, int(sets_v.get()))
-            except ValueError:
-                pass
-            ex.reps = reps_v.get().strip()
-            ex.mass = mass_v.get().strip()
-            ex.comment = comment_v.get().strip()
-
-        for ps, date_var in self._date_vars:
-            ps.date_str = date_var.get().strip()
-
-    def _build_content(self):
-        canvas = getattr(self.scroll, "_parent_canvas", None)
-        y_scroll = canvas.yview() if canvas else None
-
-        for w in self.scroll.winfo_children():
-            w.destroy()
-        self._widgets.clear()
-        self._date_vars.clear()
-        self._day_containers = []
-
-        hdr = ctk.CTkFrame(self.scroll, fg_color="#1a1a1a", corner_radius=0)
-        hdr.pack(fill="x")
-        ctk.CTkLabel(hdr, text=self.title(), font=("Roboto", 17, "bold")).pack(
-            anchor="w", padx=10, pady=(10, 2)
-        )
-        txt = (
-            "Define your training split. Type an exercise name to configure sets/reps.\n"
-            "An autocomplete drop-down will suggest exercises from the library as you type."
-        )
-        ctk.CTkLabel(
-            hdr, text=txt, font=("Roboto", 12), text_color="#888", justify="left"
-        ).pack(anchor="w", padx=10, pady=(0, 10))
-
-        for s_idx, ps in enumerate(self._planned):
-            day_container = ctk.CTkFrame(self.scroll, fg_color="transparent")
-            day_container.pack(fill="x", pady=4)
-            self._day_containers.append(day_container)
-
-            s_hdr = ctk.CTkFrame(day_container, fg_color="#222", corner_radius=10)
-            s_hdr.pack(fill="x", pady=(10, 4))
-
-            ctk.CTkLabel(
-                s_hdr,
-                text=f"Day {ps.day_number}",
-                font=("Roboto", 13, "bold"),
-                fg_color="#00695c",
-                corner_radius=6,
-                width=60,
-                height=26,
-            ).pack(side="left", padx=12, pady=8)
-
-            date_var = ctk.StringVar(value=ps.date_str)
-            self._date_vars.append((ps, date_var))
-            ctk.CTkLabel(
-                s_hdr, text="Date:", font=("Roboto", 12), text_color="#aaa"
-            ).pack(side="left", padx=(8, 2))
-            ctk.CTkEntry(
-                s_hdr, textvariable=date_var, width=110, height=28, font=("Roboto", 12)
-            ).pack(side="left", padx=(0, 12))
-
-            del_btn = ctk.CTkButton(
-                s_hdr,
-                text="🗑️",
-                width=34,
-                height=28,
-                fg_color="#5a1a1a",
-                hover_color="#c62828",
-                command=lambda idx=s_idx: self._remove_day(idx),
-            )
-            del_btn.pack(side="right", padx=12)
-            SimpleToolTip(del_btn, "Remove Day")
-
-            ctk.CTkButton(
-                s_hdr,
-                text="+ Add Exercise",
-                width=100,
-                height=28,
-                fg_color="#0277bd",
-                hover_color="#01579b",
-                command=lambda p=ps, c=day_container: self._fast_add_exercise(p, c),
-            ).pack(side="right", padx=12)
-
-            col_hdr = ctk.CTkFrame(day_container, fg_color="transparent")
-            col_hdr.pack(fill="x", padx=8)
-
-            # Matched widths for alignment: 215, 55, 115, 165, remainder, etc.
-            # Base tk.Entry width is in chars.
-            # width=24 -> ~215px | width=5 -> ~55px | width=12 -> ~115px | width=17 -> ~165px
-            layout = [
-                ("Order", 60),
-                ("Exercise Name / Slug", 215),
-                ("Sets", 55),
-                ("Reps", 115),
-                ("Mass (kg)", 165),
-                ("Comment", 150),
-                ("Quick Actions", 0),
-            ]
-            for text, w in layout:
-                ctk.CTkLabel(
-                    col_hdr,
-                    text=text,
-                    font=("Roboto", 11, "bold"),
-                    text_color="#777",
-                    width=w,
-                    anchor="w",
-                ).pack(side="left", padx=4)
-
-            for ex in ps.exercises:
-                self._build_exercise_row(ps, ex, day_container)
-
-        if canvas and y_scroll:
-            self.update_idletasks()
-            try:
-                canvas.yview_moveto(y_scroll[0])
-            except Exception:
-                pass
-
-    def _move_exercise_up(self, ps, ex):
-        if ex not in ps.exercises:
-            return
-        idx = ps.exercises.index(ex)
-        if idx <= 0:
-            return
-
-        ex_prev = ps.exercises[idx - 1]
-        ps.exercises[idx - 1], ps.exercises[idx] = (
-            ps.exercises[idx],
-            ps.exercises[idx - 1],
-        )
-
-        row_cur = next((w[2] for w in self._widgets if w[1] is ex), None)
-        row_prev = next((w[2] for w in self._widgets if w[1] is ex_prev), None)
-
-        if row_cur and row_prev and row_cur.winfo_exists() and row_prev.winfo_exists():
-            row_cur.pack(before=row_prev, fill="x", padx=8, pady=2)
-
-    def _move_exercise_down(self, ps, ex):
-        if ex not in ps.exercises:
-            return
-        idx = ps.exercises.index(ex)
-        if idx >= len(ps.exercises) - 1:
-            return
-
-        ex_next = ps.exercises[idx + 1]
-        ps.exercises[idx], ps.exercises[idx + 1] = (
-            ps.exercises[idx + 1],
-            ps.exercises[idx],
-        )
-
-        row_cur = next((w[2] for w in self._widgets if w[1] is ex), None)
-        row_next = next((w[2] for w in self._widgets if w[1] is ex_next), None)
-
-        if row_cur and row_next and row_cur.winfo_exists() and row_next.winfo_exists():
-            row_next.pack(before=row_cur, fill="x", padx=8, pady=2)
-
-    def _fast_add_exercise(self, ps, container):
-        self._save_state()
-        from core.plan_generator import PlannedExercise
-
-        new_ex = PlannedExercise(
-            var_name="", display_name="", sets=3, reps="8", mass="0", comment=""
-        )
-        ps.exercises.append(new_ex)
-        self._build_exercise_row(ps, new_ex, container)
-
-    def _fast_remove_exercise(self, ps, ex, row_frame):
-        self._save_state()
-        if ex in ps.exercises:
-            ps.exercises.remove(ex)
-        row_frame.destroy()
-
-    def _build_exercise_row(self, ps, ex, container):
-        ex_row = ctk.CTkFrame(container, fg_color="transparent")
-        ex_row.pack(fill="x", padx=8, pady=2)
-
-        # Up / Down reordering buttons
-        order_frame = ctk.CTkFrame(ex_row, fg_color="transparent", width=55)
-        order_frame.pack(side="left", padx=2)
-
-        up_btn = ctk.CTkButton(
-            order_frame,
-            text="▲",
-            width=22,
-            height=22,
-            font=("Roboto", 9, "bold"),
-            fg_color="#333333",
-            hover_color="#555555",
-            command=lambda: self._move_exercise_up(ps, ex),
-        )
-        up_btn.pack(side="left", padx=1)
-        SimpleToolTip(up_btn, "Move Exercise Up")
-
-        down_btn = ctk.CTkButton(
-            order_frame,
-            text="▼",
-            width=22,
-            height=22,
-            font=("Roboto", 9, "bold"),
-            fg_color="#333333",
-            hover_color="#555555",
-            command=lambda: self._move_exercise_down(ps, ex),
-        )
-        down_btn.pack(side="left", padx=1)
-        SimpleToolTip(down_btn, "Move Exercise Down")
-
-        name_v = ctk.StringVar(value=ex.var_name)
-        sets_v = ctk.StringVar(value=str(ex.sets))
-        reps_v = ctk.StringVar(value=str(ex.reps))
-        mass_v = ctk.StringVar(value=str(ex.mass))
-        comment_v = ctk.StringVar(value=ex.comment)
-
-        name_e = tk.Entry(
-            ex_row,
-            textvariable=name_v,
-            width=24,
-            font=("Arial", 12),
-            bg="#222222",
-            fg="#dddddd",
-            insertbackground="white",
-            relief="flat",
-            highlightbackground="#444444",
-            highlightthickness=1,
-        )
-        name_e.pack(side="left", padx=4, ipady=4)
-
-        self._setup_autocomplete(name_e, name_v)
-
-        for var, w in [(sets_v, 5), (reps_v, 12), (mass_v, 17)]:
-            e = tk.Entry(
-                ex_row,
-                textvariable=var,
-                width=w,
-                font=("Arial", 12),
-                bg="#222222",
-                fg="#dddddd",
-                insertbackground="white",
-                relief="flat",
-                highlightbackground="#444444",
-                highlightthickness=1,
-            )
-            e.pack(side="left", padx=4, ipady=4)
-
-        comment_e = tk.Entry(
-            ex_row,
-            textvariable=comment_v,
-            width=15,
-            font=("Arial", 12),
-            bg="#222222",
-            fg="#dddddd",
-            insertbackground="white",
-            relief="flat",
-            highlightbackground="#444444",
-            highlightthickness=1,
-        )
-        comment_e.pack(side="left", padx=4, fill="x", expand=True, ipady=4)
-
-        # Helpers
-        def make_add_mass_cb(m_var=mass_v, c_var=comment_v):
-            def cb():
-                m_str = m_var.get()
-                parts = [p.strip() for p in m_str.split(",") if p.strip()]
-                new_parts = []
-                for p in parts:
-                    try:
-                        v = float(p)
-                        if v > 0:
-                            v += 2.5
-                        new_parts.append(f"{v:g}")
-                    except ValueError:
-                        new_parts.append(p)
-                if new_parts:
-                    m_var.set(", ".join(new_parts))
-
-                c = c_var.get()
-                import re
-
-                match = re.search(r"\+([0-9.]+) kg", c)
-                if match:
-                    curr_plus = float(match.group(1))
-                    c = re.sub(r"\+[0-9.]+ kg", f"+{curr_plus + 2.5:g} kg", c)
-                else:
-                    c = (c + " +2.5 kg").strip()
-                c_var.set(c)
-
-            return cb
-
-        def make_add_reps_cb(r_var=reps_v, c_var=comment_v):
-            def cb():
-                r_str = r_var.get()
-                parts = [p.strip() for p in r_str.split(",") if p.strip()]
-                new_parts = []
-                for p in parts:
-                    try:
-                        v = int(float(p))
-                        v += 2
-                        new_parts.append(str(v))
-                    except ValueError:
-                        new_parts.append(p)
-                if new_parts:
-                    r_var.set(", ".join(new_parts))
-
-                c = c_var.get()
-                import re
-
-                match = re.search(r"\+([0-9]+) reps", c)
-                if match:
-                    curr_plus = int(match.group(1))
-                    c = re.sub(r"\+[0-9]+ reps", f"+{curr_plus + 2} reps", c)
-                else:
-                    c = (c + " +2 reps").strip()
-                c_var.set(c)
-
-            return cb
-
-        ctk.CTkButton(
-            ex_row,
-            text="+2.5 kg",
-            width=60,
-            height=24,
-            font=("Roboto", 11),
-            fg_color="#1B5E20",
-            hover_color="#2E7D32",
-            command=make_add_mass_cb(),
-        ).pack(side="left", padx=2)
-
-        ctk.CTkButton(
-            ex_row,
-            text="+2 Reps",
-            width=60,
-            height=24,
-            font=("Roboto", 11),
-            fg_color="#6A1B9A",
-            hover_color="#7B1FA2",
-            command=make_add_reps_cb(),
-        ).pack(side="left", padx=2)
-
-        del_ex_btn = ctk.CTkButton(
-            ex_row,
-            text="X",
-            width=28,
-            height=24,
-            fg_color="#c62828",
-            hover_color="#b71c1c",
-            command=lambda: self._fast_remove_exercise(ps, ex, ex_row),
-        )
-        del_ex_btn.pack(side="left", padx=2)
-        SimpleToolTip(del_ex_btn, "Remove Exercise")
-
-        self._widgets.append(
-            (ps, ex, ex_row, name_v, sets_v, reps_v, mass_v, comment_v)
-        )
-
-    def _setup_autocomplete(self, entry, var):
-        # State held via entry dictionary
-        if not hasattr(entry, "popup"):
-            entry.popup = None
-
-        def on_keyrelease(event):
-            # ignore navigation keys
-            if event.keysym in ("Up", "Down", "Return", "Escape", "Left", "Right"):
-                return
-
-            import re
-
-            val = re.sub(r"\W+", "_", var.get().lower()).strip("_")
-            if val and val[0].isdigit():
-                val = "_" + val
-
-            if not val:
-                close_popup()
-                entry.config(fg="#dddddd")
-                return
-
-            matches = [s for s in self._standards if val in s]
-
-            # color validation
-            if val in self._standards:
-                entry.config(fg="#4caf50")
-            elif matches:
-                entry.config(fg="#ffeb3b")
-            else:
-                entry.config(fg="#ffab91")
-
-            if not matches or val in self._standards:
-                close_popup()
-                return
-
-            if not entry.popup:
-                entry.popup = tk.Toplevel(entry)
-                entry.popup.wm_overrideredirect(True)
-                entry.popup.configure(bg="#333333")
-
-                listbox = tk.Listbox(
-                    entry.popup,
-                    font=("Arial", 11),
-                    bg="#333",
-                    fg="#ddd",
-                    selectbackground="#0277bd",
-                    highlightthickness=1,
-                    highlightbackground="#555",
-                    highlightcolor="#555",
-                )
-                listbox.pack(fill="both", expand=True)
-
-                def on_select(e=None):
-                    if not listbox.curselection():
-                        return
-                    sel = listbox.get(listbox.curselection()[0])
-                    var.set(sel)
-                    if entry.winfo_exists():
-                        entry.config(fg="#4caf50")
-                    close_popup()
-                    if entry.winfo_exists():
-                        try:
-                            entry.focus_set()
-                            entry.icursor(tk.END)
-                        except tk.TclError:
-                            pass
-
-                listbox.bind("<ButtonRelease-1>", on_select)
-                entry.popup.listbox = listbox
-            else:
-                entry.popup.listbox.delete(0, tk.END)
-
-            # Compute position globally
-            x = entry.winfo_rootx()
-            y = entry.winfo_rooty() + entry.winfo_height()
-            w = entry.winfo_width()
-            h = min(100, len(matches) * 22) + 2
-            entry.popup.wm_geometry(f"{w}x{h}+{x}+{y}")
-
-            for m in matches:
-                entry.popup.listbox.insert(tk.END, m)
-
-        def on_updown(event):
-            if not entry.popup:
-                return
-            lb = entry.popup.listbox
-            curr = lb.curselection()
-            idx = curr[0] if curr else -1
-            if event.keysym == "Down":
-                idx = min(idx + 1, lb.size() - 1)
-            elif event.keysym == "Up":
-                idx = max(idx - 1, 0)
-            lb.selection_clear(0, tk.END)
-            lb.selection_set(idx)
-            lb.see(idx)
-            return "break"
-
-        def on_return(event):
-            if entry.popup and entry.popup.listbox.curselection():
-                sel = entry.popup.listbox.get(entry.popup.listbox.curselection()[0])
-                var.set(sel)
-                entry.config(fg="#4caf50")
-                close_popup()
-                return "break"
-
-        def close_popup(*args):
-            # Check winfo_exists() to avoid TclError if window closed during after() delay
-            if not entry.winfo_exists():
-                return
-            if entry.popup:
-                entry.popup.destroy()
-                entry.popup = None
-
-        entry.bind("<KeyRelease>", on_keyrelease)
-        entry.bind("<Down>", on_updown)
-        entry.bind("<Up>", on_updown)
-        entry.bind("<Return>", on_return)
-        # Delay closing so mouse clicks can register
-        entry.bind("<FocusOut>", lambda e: entry.after(150, close_popup))
-        self.bind("<Configure>", lambda e: close_popup(), add="+")
-
-    def _on_confirm(self):
-        self._save_state()
-
-        # Date validation: reject placeholder "YYYY-MM-DD" dates where DD is literal
-        import re as _re
-        for ps in self._planned:
-            if _re.search(r"-DD$", ps.date_str):
-                import tkinter.messagebox as mb
-                mb.showerror(
-                    "Incomplete Date",
-                    f"Day {ps.day_number} still has a placeholder date "
-                    f"'{ps.date_str}'.\n\nPlease replace 'DD' with the exact day number "
-                    f"before saving (e.g. {ps.date_str[:-2]}14).",
-                    parent=self,
-                )
-                return
-
-        # Validation
-        for s_idx, ps in enumerate(self._planned):
-            for e_idx, ex in enumerate(ps.exercises):
-                if not ex.var_name.strip():
-                    import tkinter.messagebox as mb
-
-                    mb.showerror(
-                        "Validation Error",
-                        f"Exercise name cannot be empty (Day {ps.day_number}, row {e_idx + 1}).",
-                        parent=self,
-                    )
-                    return
-
-                reps_list = [r.strip() for r in str(ex.reps).split(",") if r.strip()]
-                mass_list = [m.strip() for m in str(ex.mass).split(",") if m.strip()]
-
-                if len(reps_list) > 1 and len(reps_list) != ex.sets:
-                    import tkinter.messagebox as mb
-
-                    mb.showerror(
-                        "Validation Error",
-                        f"In '{ex.var_name}' (Day {ps.day_number}): You specified {ex.sets} sets, but provided {len(reps_list)} rep values.\nProvide 1 unified value, or exactly {ex.sets}.",
-                        parent=self,
-                    )
-                    return
-
-                if len(mass_list) > 1 and len(mass_list) != ex.sets:
-                    import tkinter.messagebox as mb
-
-                    mb.showerror(
-                        "Validation Error",
-                        f"In '{ex.var_name}' (Day {ps.day_number}): You specified {ex.sets} sets, but provided {len(mass_list)} mass values.\nProvide 1 unified value, or exactly {ex.sets}.",
-                        parent=self,
-                    )
-                    return
-
-        try:
-            if self._mode == "initial":
-                if self._profile_is_edit:
-                    self._parent_app.manager.update_profile(
-                        self._profile_index, self._profile
-                    )
-                else:
-                    self._parent_app.manager.add_profile(self._profile)
-                    self._parent_app.manager.set_active(len(self._parent_app.manager.profiles) - 1)
-                self._parent_app.init_menu()
-
-                from core.plan_generator import create_initial_sessions_py
-
-                create_initial_sessions_py(
-                    self._file_path,
-                    self._profile.name,
-                    self._profile.sex,
-                    self._planned,
-                )
-
-                self._parent_app.show_dashboard()
-                self._parent_app.set_status("✅ Initial split created!", "green", 5000)
-            else:
-                from core.plan_generator import (
-                    get_genuinely_new_exercises,
-                    write_planned_sessions,
-                )
-
-                try:
-                    new_exs = get_genuinely_new_exercises(self._file_path, self._planned)
-                except Exception:
-                    new_exs = []
-
-                if new_exs:
-                    import tkinter.messagebox as mb
-
-                    ex_list_str = "\n".join(f"  • {ex}" for ex in new_exs)
-                    proceed = mb.askyesno(
-                        "Confirm New Exercise(s)",
-                        f"The following new exercise(s) were not found in sessions.py and will be automatically registered:\n\n{ex_list_str}\n\nDo you want to proceed and add them?",
-                        parent=self,
-                    )
-                    if not proceed:
-                        return
-
-                write_planned_sessions(self._file_path, self._planned)
-
-                import threading
-
-                threading.Thread(
-                    target=self._parent_app._load_recent_sessions, daemon=True
-                ).start()
-                self._parent_app.set_status(
-                    f"✅ Created plan with {len(self._planned)} days",
-                    "#4caf50",
-                    auto_reset_ms=5000,
-                )
-
-            self.confirmed = True
-            self.destroy()
-
-        except Exception as e:
-            import tkinter.messagebox as mb
-
-            mb.showerror("Save Error", str(e), parent=self)
+def run_webview_app():
+    global _MAIN_WINDOW
+    api = WebViewBridgeApi()
+    _MAIN_WINDOW = webview.create_window(
+        title=f"Iron Log - Strength Tracker v{__version__} (PyWebView Edition)",
+        html=HTML_TEMPLATE,
+        js_api=api,
+        width=1160,
+        height=740,
+        min_size=(960, 600),
+        background_color="#0A0D14",
+    )
+    webview.start(debug=False)
 
 
 if __name__ == "__main__":
-    app = IronLogApp()
-    app.mainloop()
+    run_webview_app()
+
+# Alias for standard entry point
+run_desktop_app = run_webview_app
+
