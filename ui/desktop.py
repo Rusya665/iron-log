@@ -1621,10 +1621,37 @@ PLANNER_HTML_TEMPLATE = r"""
 
     <main id="cyclerDaysContainer"></main>
 
+    <!-- Deload Modal Prompt -->
+    <div id="modalDeloadPrompt" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.78); backdrop-filter:blur(10px); z-index:9999; align-items:center; justify-content:center;">
+        <div style="background:#131B2A; border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:22px 24px; width:360px; box-shadow:0 24px 60px rgba(0,0,0,0.9); display:flex; flex-direction:column; gap:14px;">
+            <div style="font-family:'Outfit',sans-serif; font-size:16px; font-weight:800; color:#FFF; display:flex; align-items:center; gap:8px;">
+                <span>🧪</span> Enter Deload Percentage
+            </div>
+            <div style="font-size:12px; color:var(--text-secondary); line-height:1.4;">
+                Specify the reduction percentage (e.g. 20 for -20% / 80% weight). Mass will be scaled and rounded to 2.5 kg plates.
+            </div>
+            <div style="display:flex; align-items:center; gap:8px;">
+                <input type="number" id="deloadPercentInput" class="plan-input" style="flex:1; font-size:15px; font-weight:700; text-align:center;" value="20" min="1" max="99" step="1" onkeydown="if(event.key==='Enter') confirmDeload()">
+                <span style="font-size:15px; font-weight:700; color:#94A3B8;">%</span>
+            </div>
+            <div style="display:flex; gap:6px; font-size:11px; color:#64748B; flex-wrap:wrap;">
+                <span>Quick presets:</span>
+                <a href="javascript:void(0)" onclick="setDeloadVal(10)" style="color:#38BDF8; text-decoration:none;">-10%</a> · 
+                <a href="javascript:void(0)" onclick="setDeloadVal(20)" style="color:#38BDF8; text-decoration:none;">-20% (80% load)</a> · 
+                <a href="javascript:void(0)" onclick="setDeloadVal(25)" style="color:#38BDF8; text-decoration:none;">-25%</a> · 
+                <a href="javascript:void(0)" onclick="setDeloadVal(30)" style="color:#38BDF8; text-decoration:none;">-30% (70% load)</a>
+            </div>
+            <div style="display:flex; gap:10px; margin-top:6px; justify-content:flex-end;">
+                <button class="btn-sec" style="padding:7px 14px; font-size:12px;" onclick="closeDeloadModal()">Cancel</button>
+                <button class="btn-primary2" style="padding:7px 16px; font-size:12px;" onclick="confirmDeload()">Apply</button>
+            </div>
+        </div>
+    </div>
+
     <footer>
         <button class="btn-sec" onclick="window.close()">Cancel</button>
         <button class="btn-primary2" onclick="addPlanDay()">+ Add Day</button>
-        <button class="btn-sec" onclick="applyDeload()">🧪 Deload Next Cycle (-10%)</button>
+        <button class="btn-sec" onclick="applyDeload()">🧪 Deload Next Cycle...</button>
         <button class="btn-save-plan" onclick="saveCyclerPlan()">✅ Write to sessions.py</button>
     </footer>
 
@@ -1773,22 +1800,65 @@ PLANNER_HTML_TEMPLATE = r"""
             });
             renderCyclerDays();
         }
-        function applyDeload() {
+        function openDeloadModal() {
+            const m = document.getElementById("modalDeloadPrompt");
+            if (m) {
+                m.style.display = "flex";
+                const inp = document.getElementById("deloadPercentInput");
+                if (inp) { inp.focus(); inp.select(); }
+            } else {
+                const val = prompt("Enter deload percentage (e.g. 20 for -20% / 80% weight):", "20");
+                if (val !== null) applyDeloadPercentage(parseFloat(val));
+            }
+        }
+        function closeDeloadModal() {
+            const m = document.getElementById("modalDeloadPrompt");
+            if (m) m.style.display = "none";
+        }
+        function setDeloadVal(v) {
+            const inp = document.getElementById("deloadPercentInput");
+            if (inp) inp.value = v;
+        }
+        function confirmDeload() {
+            const inp = document.getElementById("deloadPercentInput");
+            const val = inp ? parseFloat(inp.value) : 20;
+            closeDeloadModal();
+            applyDeloadPercentage(val);
+        }
+        function applyDeloadPercentage(percent) {
+            if (isNaN(percent) || percent <= 0 || percent >= 100) {
+                alert("Percentage must be between 1 and 99.");
+                return;
+            }
+            const factor = 1.0 - (percent / 100.0);
+            const tag = `${percent}% decreased deload`;
             currentPlan.forEach(d => {
                 d.exercises.forEach(ex => {
                     const mParts = (ex.mass + "").split(",").map(p => {
                         const v = parseFloat(p.trim());
-                        return !isNaN(v) && v > 0 ? (Math.round((v * 0.9) * 2) / 2) : p.trim();
+                        if (isNaN(v) || v <= 0) return p.trim();
+                        // Scale and round to nearest 2.5 kg plates
+                        let scaled = Math.round((v * factor) / 2.5) * 2.5;
+                        if (scaled === 0 && v > 0) {
+                            scaled = Math.round((v * factor) * 2) / 2;
+                        }
+                        return Math.round(scaled * 100) / 100;
                     });
                     ex.mass = mParts.join(", ");
                     let c = (ex.comment || "").trim();
-                    if (!c.includes("10% decreased deload") && !c.includes("Deload -10%")) {
-                        c = (c ? c + " · " : "") + "10% decreased deload";
-                    }
-                    ex.comment = c;
+                    c = c.replace(/\b\d+(\.\d+)?%\s*decreased\s*deload\b/gi, "")
+                         .replace(/Deload\s*-\d+%/gi, "")
+                         .replace(/·\s*·/g, "·")
+                         .trim();
+                    if (c.endsWith("·")) c = c.slice(0, -1).trim();
+                    if (c.startsWith("·")) c = c.slice(1).trim();
+                    ex.comment = c ? `${c} · ${tag}` : tag;
                 });
             });
             renderCyclerDays();
+        }
+        function applyDeload() {
+            openDeloadModal();
         }
         async function saveCyclerPlan() {
             const res = await pywebview.api.save_plan(currentPlan);
