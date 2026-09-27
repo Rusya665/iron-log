@@ -1652,6 +1652,7 @@ PLANNER_HTML_TEMPLATE = r"""
         <button class="btn-sec" onclick="window.close()">Cancel</button>
         <button class="btn-primary2" onclick="addPlanDay()">+ Add Day</button>
         <button class="btn-sec" onclick="applyDeload()">🧪 Deload Next Cycle...</button>
+        <button class="btn-sec" onclick="restorePreDeload()">🔄 Restore Pre-Deload</button>
         <button class="btn-save-plan" onclick="saveCyclerPlan()">✅ Write to sessions.py</button>
     </footer>
 
@@ -1859,6 +1860,24 @@ PLANNER_HTML_TEMPLATE = r"""
         }
         function applyDeload() {
             openDeloadModal();
+        }
+        async function restorePreDeload() {
+            if (!confirm("Restore plan from the last non-deload cycle (100% pre-deload weights)?")) return;
+            const dayNums = currentPlan.map(d => parseInt(d.day_num));
+            const res = await pywebview.api.restore_pre_deload(dayNums, 100.0);
+            if (!res.success) {
+                alert("Restore failed: " + res.error);
+                return;
+            }
+            if (res.planned && res.planned.length === currentPlan.length) {
+                res.planned.forEach((p, idx) => {
+                    if (currentPlan[idx] && currentPlan[idx].date_str) {
+                        p.date_str = currentPlan[idx].date_str;
+                    }
+                });
+            }
+            currentPlan = res.planned;
+            renderCyclerDays();
         }
         async function saveCyclerPlan() {
             const res = await pywebview.api.save_plan(currentPlan);
@@ -2357,6 +2376,60 @@ class WebViewBridgeApi:
                 for ps in planned
             ]
             return {"success": True, "planned": serializable_plan, "why": why}
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def restore_pre_deload(
+        self, day_numbers: Optional[List[int]] = None, scale_pct: float = 100.0
+    ) -> Dict[str, Any]:
+        p = self.manager.get_active_profile()
+        if not p:
+            return {"success": False, "error": "No profile"}
+
+        sess, file_path = self._load_sessions(p)
+        if not sess:
+            return {"success": False, "error": "Could not load sessions.py"}
+
+        user_data = getattr(sess, "USER_DATA", {})
+        N, last_day_int = detect_cycle(user_data)
+        if not day_numbers:
+            if N is None:
+                return {"success": False, "error": "Could not detect split cycle."}
+            day_numbers = days_to_generate(N, last_day_int) or list(range(1, N + 1))
+
+        try:
+            from core.plan_generator import build_pre_deload_baseline
+
+            planned = build_pre_deload_baseline(file_path, day_numbers, scale_pct)
+            total_exercises = sum(len(ps.exercises) for ps in planned)
+            if total_exercises == 0:
+                return {
+                    "success": False,
+                    "error": (
+                        "No pre-deload sessions found in sessions.py.\n"
+                        "Make sure your normal sessions don't have 'deload' in their comments."
+                    ),
+                }
+
+            serializable_plan = [
+                {
+                    "day_num": ps.day_number,
+                    "date_str": ps.date_str,
+                    "exercises": [
+                        {
+                            "var_name": ex.var_name,
+                            "display_name": getattr(ex, "display_name", ex.var_name),
+                            "sets": ex.sets,
+                            "reps": ex.reps,
+                            "mass": ex.mass,
+                            "comment": ex.comment,
+                        }
+                        for ex in ps.exercises
+                    ],
+                }
+                for ps in planned
+            ]
+            return {"success": True, "planned": serializable_plan}
         except Exception as e:
             return {"success": False, "error": str(e)}
 
