@@ -7,8 +7,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from ui.desktop import WebViewBridgeApi
-from core.profile_manager import Profile
+from ui.desktop import WebViewBridgeApi  # noqa: E402
 
 
 class TestDesktopBridge(unittest.TestCase):
@@ -43,6 +42,28 @@ class TestDesktopBridge(unittest.TestCase):
         self.assertFalse(res["success"])
         self.assertIn("error", res)
 
+    @patch("ui.bridge.get_update_details")
+    def test_check_updates(self, mock_details):
+        mock_details.return_value = {
+            "has_update": True,
+            "current_version": "2.0.0",
+            "latest_version": "2.1.0",
+            "download_url": "https://example.com/IronLog_Setup.exe",
+            "release_notes": "Awesome features",
+            "asset_size": 123456,
+        }
+        res = self.api.check_updates()
+        self.assertTrue(res["has_update"])
+        self.assertEqual(res["version"], "2.1.0")
+        self.assertEqual(res["url"], "https://example.com/IronLog_Setup.exe")
+        self.assertEqual(res["notes"], "Awesome features")
+
+    def test_update_status_initial(self):
+        status = self.api.get_update_status()
+        self.assertIn("state", status)
+        self.assertIn("percent", status)
+
 
 if __name__ == "__main__":
     unittest.main()
+
