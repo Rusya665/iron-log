@@ -14,14 +14,10 @@ def get_update_details(
     current_version: str,
 ) -> Dict[str, Any]:
     """
-    Queries GitHub Releases for the latest release metadata.
-    Returns a dictionary containing:
-      - has_update: bool
-      - current_version: str
-      - latest_version: Optional[str]
-      - download_url: Optional[str]
-      - release_notes: Optional[str]
-      - asset_size: int
+    Query GitHub Releases for the latest release metadata.
+
+    :param current_version: Semantic version string of the running application.
+    :return: Dictionary containing release metadata (has_update, latest_version, download_url, release_notes, asset_size).
     """
     result: Dict[str, Any] = {
         "has_update": False,
@@ -47,7 +43,6 @@ def get_update_details(
         # Compare versions
         if version.parse(latest_tag) > version.parse(current_version.lstrip("v")):
             assets = data.get("assets", [])
-            # Prefer setup installer exe (e.g. IronLog_Setup_v2.0.2.exe)
             selected_asset = None
             for asset in assets:
                 name = asset.get("name", "").lower()
@@ -55,7 +50,6 @@ def get_update_details(
                     selected_asset = asset
                     break
 
-            # Fallback to any .exe asset if no setup-named exe is found
             if not selected_asset:
                 for asset in assets:
                     if asset.get("name", "").lower().endswith(".exe"):
@@ -69,7 +63,6 @@ def get_update_details(
 
         return result
     except Exception:
-        # Silently fail on network error, timeouts, etc.
         return result
 
 
@@ -77,8 +70,10 @@ def check_for_updates(
     current_version: str,
 ) -> Tuple[bool, Optional[str], Optional[str]]:
     """
-    Checks GitHub for a newer release.
-    Returns: (update_available, new_version_string, download_url)
+    Check GitHub for a newer release tag.
+
+    :param current_version: Semantic version string of the running application.
+    :return: Tuple of (update_available, new_version_string, download_url).
     """
     details = get_update_details(current_version)
     if details["has_update"]:
@@ -91,17 +86,18 @@ def download_and_install_update(
     progress_callback: Optional[Callable[[int, int, float], None]] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Downloads the update and launches a batch script to install it silently.
-    The batch script will wait for IronLog to exit, run the installer silently,
-    restart the updated application, and then delete the setup file and itself.
-    Returns: (success: bool, error_message: Optional[str])
+    Download the installer and run a detached batch process to execute silent installation and relaunch.
+
+    :param download_url: Direct download URL of the setup executable asset.
+    :param progress_callback: Optional callback accepting (downloaded_bytes, total_bytes, percentage).
+    :return: Tuple of (success, error_message).
     """
     temp_dir = tempfile.gettempdir()
     exe_path = os.path.join(temp_dir, "IronLog_Update.exe")
     bat_path = os.path.join(temp_dir, "ironlog_install_update.bat")
 
     try:
-        # 1. Download the file in chunks
+        # Download in chunks
         headers = {"User-Agent": "IronLog-Updater"}
         with requests.get(download_url, stream=True, timeout=(15, 60), headers=headers) as r:
             r.raise_for_status()
@@ -119,37 +115,39 @@ def download_and_install_update(
         if not os.path.exists(exe_path) or os.path.getsize(exe_path) == 0:
             return False, "Downloaded update installer was empty or invalid."
 
-        # 2. Create the batch script
-        # Note: We use `ping 127.0.0.1 -n 3 > nul` instead of `timeout /t 2`
-        # because Windows `timeout` fails with "Input redirection is not supported"
-        # when running without an attached console window.
+        # Target executable path to restart after installation
+        target_installed_exe = os.path.join(
+            os.environ.get("LOCALAPPDATA", ""), "Programs", "IronLog", "IronLog.exe"
+        )
+
+        # Batch script: wait for caller to exit, install silently with /SP-, restart app, clean up
         bat_content = f"""@echo off
-echo Installing IronLog Update...
 ping 127.0.0.1 -n 3 > nul
-start /wait "" "{exe_path}" /SILENT /SUPPRESSMSGBOXES /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS
+"{exe_path}" /SP- /VERYSILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS
 ping 127.0.0.1 -n 2 > nul
+if exist "{target_installed_exe}" (
+    start "" "{target_installed_exe}"
+) else if exist "%ProgramFiles%\\IronLog\\IronLog.exe" (
+    start "" "%ProgramFiles%\\IronLog\\IronLog.exe"
+)
 del /f /q "{exe_path}"
 del /f /q "%~f0"
 """
         with open(bat_path, "w", encoding="utf-8") as f:
             f.write(bat_content)
 
-        # 3. Launch the batch script detached, without a console window
-        # Strip PyInstaller environment variables so the restarted app
-        # doesn't try to load DLLs from the old, deleted temp directory.
+        # Strip PyInstaller env variables so spawned process starts fresh
         env = os.environ.copy()
         keys_to_remove = [
-            k
-            for k in env
-            if k.upper().startswith("_PYI_") or k.upper().startswith("_MEI")
+            k for k in env if k.upper().startswith("_PYI_") or k.upper().startswith("_MEI")
         ]
         for k in keys_to_remove:
-            env.pop(k)
+            env.pop(k, None)
 
-        # CREATE_NO_WINDOW = 0x08000000, DETACHED_PROCESS = 0x00000008
+        # DETACHED_PROCESS = 0x00000008, CREATE_NEW_PROCESS_GROUP = 0x00000200
         subprocess.Popen(
             ["cmd.exe", "/c", bat_path],
-            creationflags=0x08000000 | 0x00000008,
+            creationflags=0x00000008 | 0x00000200,
             env=env,
             close_fds=True,
         )
@@ -162,6 +160,5 @@ del /f /q "%~f0"
                 os.remove(exe_path)
             except Exception:
                 pass
-        print(f"Error downloading or installing update: {e}")
         return False, str(e)
 

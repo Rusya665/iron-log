@@ -13,7 +13,7 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 # ---------------------------------------------------------------------------
 # Pre-compiled Regex Patterns for Performance
@@ -29,12 +29,12 @@ _ASSIGNMENT_RE = re.compile(r"^([a-zA-Z_]\w*)\s*=", re.MULTILINE)
 
 @dataclass
 class PlannedExercise:
-    var_name: str  # Python variable name in sessions.py  (e.g. "squat")
+    var_name: str  # Python variable name in sessions.py (e.g. "squat")
     display_name: str  # Human-readable (e.g. "Squat")
     sets: int
     reps: str  # comma-separated reps, e.g. "6" or "6, 6, 6" or "10, 8, 6"
     mass: str  # comma-separated mass, e.g. "100.0" or "100.0, 97.5"
-    comment: str = ""  # optional user comment (written as  # "text")
+    comment: str = ""  # optional user comment (written as # "text")
 
 
 @dataclass
@@ -49,18 +49,12 @@ class PlannedSession:
 # ---------------------------------------------------------------------------
 
 
-def detect_cycle(user_data: dict) -> Tuple[Optional[int], Optional[int]]:
-    """Scan USER_DATA for Day(int) sessions and determine the split cycle.
+def detect_cycle(user_data: Dict[str, Any]) -> Tuple[Optional[int], Optional[int]]:
+    """
+    Scan user workout data for Day session markers and determine split cycle length.
 
-    Algorithm
-    ---------
-    Collect all integer day values in chronological order.
-    Walk backward: when we see prev > current, that jump is the cycle boundary.
-    The larger value = N (cycle length).
-
-    Returns
-    -------
-    (N, last_day)  — both ints, or (None, None) when not enough data.
+    :param user_data: Dictionary mapping workout date strings to session log mappings.
+    :return: Tuple of (cycle_length, last_day_number), or (None, None) if insufficient data.
     """
     int_days: List[int] = []
     for date_str in sorted(user_data.keys()):
@@ -83,15 +77,17 @@ def detect_cycle(user_data: dict) -> Tuple[Optional[int], Optional[int]]:
     return int_days[-1], last_day
 
 
-def days_to_generate(N: int, last_day: int) -> List[int]:
-    """Given cycle length N and the last completed day, return day numbers to plan.
-
-    - last_day >= N  →  full new cycle:  [1, 2, ..., N]
-    - last_day < N   →  complete current: [last_day+1, ..., N]
+def days_to_generate(cycle_length: int, last_day: int) -> List[int]:
     """
-    if last_day >= N:
-        return list(range(1, N + 1))
-    return list(range(last_day + 1, N + 1))
+    Determine upcoming day numbers to plan based on cycle length and last completed day.
+
+    :param cycle_length: Split cycle length N.
+    :param last_day: Most recently completed day number.
+    :return: List of upcoming day numbers to plan.
+    """
+    if last_day >= cycle_length:
+        return list(range(1, cycle_length + 1))
+    return list(range(last_day + 1, cycle_length + 1))
 
 
 # ---------------------------------------------------------------------------
@@ -99,8 +95,14 @@ def days_to_generate(N: int, last_day: int) -> List[int]:
 # ---------------------------------------------------------------------------
 
 
-def _next_date_after(user_data: dict, n_sessions: int) -> List[str]:
-    """Return n_sessions placeholder dates starting 2 days after the last entry."""
+def _next_date_after(user_data: Dict[str, Any], n_sessions: int) -> List[str]:
+    """
+    Generate placeholder dates starting two days after the last recorded session.
+
+    :param user_data: Dictionary mapping workout date strings to session entries.
+    :param n_sessions: Number of sequential session dates to generate.
+    :return: List of ISO date strings (YYYY-MM-DD).
+    """
     date_pat = re.compile(r"^\d{4}-\d{2}-\d{2}$")
     valid_dates = [k for k in user_data.keys() if date_pat.match(str(k))]
     if not valid_dates:
@@ -128,15 +130,12 @@ def _next_date_after(user_data: dict, n_sessions: int) -> List[str]:
 def build_planned_sessions(
     sessions_file_path: str, day_numbers: List[int]
 ) -> List[PlannedSession]:
-    """Read sessions.py and construct PlannedSession objects for the given day numbers.
+    """
+    Read sessions.py and construct PlannedSession instances for specified day numbers.
 
-    Reads the *last* occurrence of each Day-N block to get the most recent
-    progression baseline, then applies a simple +2.5 kg / same-reps progression.
-
-    Returns
-    -------
-    list[PlannedSession] — one per requested day, pre-filled with suggested values.
-    The caller (UI dialog) lets the user edit before writing.
+    :param sessions_file_path: Path to sessions.py source file.
+    :param day_numbers: Target day numbers to plan.
+    :return: List of PlannedSession objects populated with baseline progression values.
     """
     from core.standards import EXERCISE_STANDARDS
 
@@ -293,12 +292,18 @@ def build_planned_sessions(
     return planned
 
 
-def _suggest_progression(reps: list, mass: list) -> dict:
-    """Return an exact baseline copy from the previous session."""
+def _suggest_progression(reps: List[float], mass: List[float]) -> Dict[str, Any]:
+    """
+    Format previous session sets, reps, and masses into input strings for plan dialogs.
+
+    :param reps: Repetition counts from previous session sets.
+    :param mass: Mass values from previous session sets.
+    :return: Dictionary containing set count, formatted reps string, and mass string.
+    """
     n_sets = len(reps)
 
-    def _fmt_rep(r):
-        """Format a rep value: whole-number floats become ints (6.0 → 6)."""
+    def _fmt_rep(r: float) -> str:
+        """Format a rep value: whole-number floats become ints (6.0 -> 6)."""
         if isinstance(r, float) and r.is_integer():
             return str(int(r))
         return str(r)
@@ -329,8 +334,13 @@ _BLOCK_OPEN_RE = re.compile(
 )
 
 
-def _is_deload_block(block_lines: list[str]) -> bool:
-    """Return True if any exercise line in the block carries a 'deload' comment."""
+def _is_deload_block(block_lines: List[str]) -> bool:
+    """
+    Check if a session block contains deload markers in comments.
+
+    :param block_lines: Raw source code lines belonging to a session block.
+    :return: True if a deload marker is detected, False otherwise.
+    """
     return any(_DELOAD_COMMENT_RE.search(ln) for ln in block_lines)
 
 
@@ -338,32 +348,14 @@ def build_pre_deload_baseline(
     sessions_file_path: str,
     day_numbers: List[int],
     scale_pct: float,
-) -> List["PlannedSession"]:
-    """Build PlannedSession objects from the *last non-deload* cycle.
+) -> List[PlannedSession]:
+    """
+    Construct PlannedSession instances from the most recent non-deload cycle scaled by a percentage.
 
-    Algorithm
-    ---------
-    1. Parse sessions.py raw text into ordered ``(date, day_number, block_lines)``
-       tuples — most-recent first.
-    2. A block is considered a *deload block* if any exercise line contains
-       the word "deload" in its inline comment.
-    3. Walk backward; for each requested day number, take the **first block that
-       is NOT a deload block** as the pre-deload baseline.
-    4. Scale every mass by ``scale_pct / 100``, round to nearest 2.5 kg.
-    5. Preserve reps/sets exactly; reset comments to e.g. ``"85% of pre-deload"``.
-
-    Parameters
-    ----------
-    sessions_file_path:
-        Path to sessions.py.
-    day_numbers:
-        Day numbers to plan (e.g. ``[1, 2, 3]`` for a full 3-day cycle).
-    scale_pct:
-        Percentage of the pre-deload max to target (e.g. ``85`` for 85%).
-
-    Returns
-    -------
-    list[PlannedSession]
+    :param sessions_file_path: Path to sessions.py file.
+    :param day_numbers: Day numbers to plan (e.g. [1, 2, 3]).
+    :param scale_pct: Target percentage of previous max mass (e.g. 85.0).
+    :return: List of PlannedSession objects scaled to target intensity.
     """
     from core.standards import EXERCISE_STANDARDS
 
@@ -478,19 +470,18 @@ def build_pre_deload_baseline(
 
 def resolve_exercise_vars(
     sessions_file_path: str, raw_names: List[str]
-) -> Tuple[dict, List[str]]:
-    """Resolve raw exercise names from UI input against existing variable definitions in sessions.py.
+) -> Tuple[Dict[str, str], List[str]]:
+    """
+    Resolve raw exercise display names against defined variables in sessions.py.
 
-    Returns
-    -------
-    (resolved_map, missing_slugs):
-        - resolved_map: Dict[raw_name, exact_var_name_to_use]
-        - missing_slugs: List of slugs for exercises genuinely absent from sessions.py
+    :param sessions_file_path: Path to sessions.py file.
+    :param raw_names: Raw exercise name strings entered in UI.
+    :return: Tuple containing resolved variable map and list of missing exercise slugs.
     """
     import os
 
-    var_to_id: dict = {}
-    defined_vars: set = set()
+    var_to_id: Dict[str, str] = {}
+    defined_vars: Set[str] = set()
 
     sessions_dir = str(__import__("pathlib").Path(sessions_file_path).parent)
     import sys
@@ -531,9 +522,9 @@ def resolve_exercise_vars(
             ):
                 defined_vars.add(vname)
 
-    resolved_map: dict = {}
+    resolved_map: Dict[str, str] = {}
     missing_slugs: List[str] = []
-    seen_missing = set()
+    seen_missing: Set[str] = set()
 
     for raw in raw_names:
         raw_trimmed = raw.strip()
@@ -596,7 +587,13 @@ def resolve_exercise_vars(
 def get_genuinely_new_exercises(
     sessions_file_path: str, planned: List[PlannedSession]
 ) -> List[str]:
-    """Return a list of exercise variable names in `planned` that do not exist in sessions.py."""
+    """
+    Identify exercise variables in planned sessions not defined in sessions.py.
+
+    :param sessions_file_path: Path to sessions.py file.
+    :param planned: List of PlannedSession instances.
+    :return: List of missing exercise slugs.
+    """
     all_raw = [
         ex.var_name
         for ps in planned
@@ -615,10 +612,12 @@ def get_genuinely_new_exercises(
 def write_planned_sessions(
     sessions_file_path: str, planned: List[PlannedSession]
 ) -> None:
-    """Inject the confirmed planned sessions into sessions.py.
+    """
+    Append planned sessions into sessions.py and register any missing exercise variables.
 
-    If any exercise variable is missing from the file entirely, it will automatically
-    define the variable and insert it into EXERCISE_REGISTRY.
+    :param sessions_file_path: Path to sessions.py file.
+    :param planned: List of PlannedSession instances to write.
+    :return: None.
     """
     import os
 
@@ -745,7 +744,15 @@ def write_planned_sessions(
 def create_initial_sessions_py(
     sessions_file_path: str, owner_name: str, sex: str, planned: List[PlannedSession]
 ) -> None:
-    """Create a completely new sessions.py file for a new user with the first cycle."""
+    """
+    Generate a new sessions.py file containing user metadata, registries, and initial cycle.
+
+    :param sessions_file_path: Destination path for new sessions.py.
+    :param owner_name: Profile owner display name.
+    :param sex: Biological sex ("male" or "female").
+    :param planned: Initial PlannedSession instances.
+    :return: None.
+    """
     import os
 
     lines = [
@@ -792,8 +799,6 @@ def create_initial_sessions_py(
     lines.append("USER_DATA = {")
 
     # Write the planned sessions
-    from datetime import datetime
-
     for ps in planned:
         lines.append(f'    "{ps.date_str}": {{  # Day {ps.day_number}')
         lines.append(f"        day: {ps.day_number},")
@@ -827,14 +832,14 @@ def create_initial_sessions_py(
 
 def detect_sessions_owner(file_path: str) -> Optional[str]:
     """
-    Safely extract the SESSIONS_OWNER value from a sessions.py file
-    using regex to avoid side-effects from importing the file.
+    Extract SESSIONS_OWNER value from a sessions.py file without importing.
+
+    :param file_path: Path to sessions.py file.
+    :return: Owner name string if found, None otherwise.
     """
     if not os.path.exists(file_path):
         return None
     try:
-        import re
-
         with open(file_path, "r", encoding="utf-8") as f:
             content = f.read()
             match = re.search(
@@ -847,18 +852,22 @@ def detect_sessions_owner(file_path: str) -> Optional[str]:
     return None
 
 
-def get_deload_dates(sessions_file_path: str) -> set:
-    """Scan sessions.py file for sessions marked with the word 'deload' in comments."""
+def get_deload_dates(sessions_file_path: str) -> Set[str]:
+    """
+    Scan sessions.py for dates of sessions containing deload comments.
+
+    :param sessions_file_path: Path to sessions.py file.
+    :return: Set of date strings (YYYY-MM-DD).
+    """
     if not sessions_file_path or not os.path.exists(sessions_file_path):
         return set()
-    
-    import re
+
     date_re = re.compile(r'^\s*"(\d{4}-\d{2}-\d{2})"\s*:\s*\{')
     deload_re = re.compile(r'#.*deload', re.IGNORECASE)
-    
-    deload_dates = set()
-    current_date = None
-    
+
+    deload_dates: Set[str] = set()
+    current_date: Optional[str] = None
+
     try:
         with open(sessions_file_path, "r", encoding="utf-8") as f:
             for line in f:
@@ -872,35 +881,39 @@ def get_deload_dates(sessions_file_path: str) -> set:
                         current_date = None
     except Exception:
         pass
-        
+
     return deload_dates
 
 
-def calculate_gym_stats(user_data: dict) -> dict:
-    """Calculate gym attendance metrics and active split duration from USER_DATA."""
-    from datetime import datetime
-    import re
+def calculate_gym_stats(user_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Calculate workout attendance totals, active split duration, and session breakdowns.
+
+    :param user_data: Dictionary mapping workout date strings to session log mappings.
+    :return: Dictionary containing attendance counts and active split metadata.
+    """
     import sys
     from core.models import Log
 
     # Parse deload dates if we can resolve sessions.py
-    deload_dates = set()
+    deload_dates: Set[str] = set()
     if "sessions" in sys.modules:
-        sessions_file = sys.modules["sessions"].__file__
-        deload_dates = get_deload_dates(sessions_file)
+        sessions_file = getattr(sys.modules["sessions"], "__file__", None)
+        if sessions_file:
+            deload_dates = get_deload_dates(sessions_file)
 
     date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
     sorted_dates = sorted([k for k in user_data.keys() if date_pattern.match(k)])
-    
+
     total_days = len(sorted_dates)
-    
+
     now = datetime.now()
     curr_year_str = f"{now.year:04d}"
     curr_month_str = f"{now.year:04d}-{now.month:02d}"
-    
+
     this_year_days = sum(1 for d in sorted_dates if d.startswith(curr_year_str))
     this_month_days = sum(1 for d in sorted_dates if d.startswith(curr_month_str))
-    
+
     latest_workout_date = sorted_dates[-1] if sorted_dates else "N/A"
     latest_workout_day = user_data[latest_workout_date].get("day", "N/A") if sorted_dates else "N/A"
 
@@ -916,20 +929,20 @@ def calculate_gym_stats(user_data: dict) -> dict:
                 "day": v,
                 "exercises": exercises
             })
-            
+
     current_split_weeks = 0.0
     current_split_start = "N/A"
     cycle_length = None
-    split_days_exercises = {}
-    split_sessions_details = []
-    
+    split_days_exercises: Dict[int, List[str]] = {}
+    split_sessions_details: List[Dict[str, Any]] = []
+
     if training_sessions:
         # Detect cycle length for current split
         N, _ = detect_cycle(user_data)
         cycle_length = N
-        
+
         # Build reference map from latest sessions of this block
-        ref_map = {}
+        ref_map: Dict[int, Set[str]] = {}
         i = len(training_sessions) - 1
         scan_idx = i
         detected_days = []
@@ -943,12 +956,12 @@ def calculate_gym_stats(user_data: dict) -> dict:
                 if d in detected_days:
                     break
             scan_idx -= 1
-            
-        def jaccard_similarity(set1, set2):
+
+        def jaccard_similarity(set1: Set[str], set2: Set[str]) -> float:
             if not set1 or not set2:
                 return 0.0
             return len(set1.intersection(set2)) / len(set1.union(set2))
-            
+
         split_start_idx = i
         while i >= 0:
             s = training_sessions[i]
@@ -964,29 +977,28 @@ def calculate_gym_stats(user_data: dict) -> dict:
                 break
             split_start_idx = i
             i -= 1
-            
+
         split_start_session = training_sessions[split_start_idx]
         split_end_session = training_sessions[-1]
-        
+
         duration_days = (split_end_session["date"] - split_start_session["date"]).days
         current_split_weeks = max(0.0, duration_days / 7.0)
         current_split_start = split_start_session["date_str"]
-        
+
         # Populate exercise structure and sessions details for the GUI detail popup
         from core.standards import EXERCISE_STANDARDS
         id_to_name = {slug: info.get("name", slug) for slug, info in EXERCISE_STANDARDS.items()}
-        
-        raw_split_days_ex = {}
+
+        raw_split_days_ex: Dict[int, Set[str]] = {}
         for s in training_sessions[split_start_idx:]:
             d = s["day"]
             raw_split_days_ex.setdefault(d, set()).update(s["exercises"])
-            
-        split_days_exercises = {}
+
         for d, ex_set in raw_split_days_ex.items():
             split_days_exercises[d] = sorted([id_to_name.get(ex, ex) for ex in ex_set])
-            
+
         split_sessions_details = [{"date": s["date_str"], "day": s["day"]} for s in training_sessions[split_start_idx:]]
-        
+
     return {
         "total_days": total_days,
         "this_year_days": this_year_days,

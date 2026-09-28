@@ -1,7 +1,7 @@
 import statistics
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 import xlsxwriter
 
@@ -19,30 +19,54 @@ class Metric:
 
 
 def calc_vol(d: Log) -> float:
+    """
+    Calculate total volume for a single exercise log entry.
+
+    :param d: Exercise log entry containing reps and mass lists.
+    :return: Calculated total volume in kg.
+    """
     return sum(r * m for r, m in zip(d.reps, d.mass))
 
 
 def calc_avg_mass(d: Log) -> float:
-    return statistics.mean(d.mass) if d.mass else 0
+    """
+    Calculate average mass across all sets in an exercise log entry.
+
+    :param d: Exercise log entry containing reps and mass lists.
+    :return: Mean mass lifted across sets, or 0.0 if empty.
+    """
+    return statistics.mean(d.mass) if d.mass else 0.0
 
 
 def calc_stdev(d: Log) -> float:
-    return statistics.stdev(d.mass) if len(d.mass) > 1 else 0
+    """
+    Calculate standard deviation of mass across sets in an exercise log entry.
+
+    :param d: Exercise log entry containing reps and mass lists.
+    :return: Standard deviation of set masses, or 0.0 if fewer than 2 sets.
+    """
+    return statistics.stdev(d.mass) if len(d.mass) > 1 else 0.0
 
 
 def calc_brzycki(d: Log) -> float:
+    """
+    Calculate estimated 1RM using the Brzycki formula across all sets in a log entry.
+
+    :param d: Exercise log entry containing reps and mass lists.
+    :return: Highest estimated 1RM among sets in the log entry.
+    """
     if not d.reps:
-        return 0
+        return 0.0
     if d.mass and max(d.mass) == 0:
         valid_reps = [r for r in d.reps if r > 0]
-        return max(valid_reps) if valid_reps else 0
+        return float(max(valid_reps)) if valid_reps else 0.0
 
     one_rms = [
         m * (36 / (37 - r)) if r < 37 else m
         for r, m in zip(d.reps, d.mass)
         if r > 0
     ]
-    return max(one_rms) if one_rms else 0
+    return float(max(one_rms)) if one_rms else 0.0
 
 
 METRICS_CONFIG: List[Metric] = [
@@ -84,9 +108,19 @@ class TrainingLogProcessor:
         output_path: str,
         exercises: List[Exercise],
         user_data: Dict[str, Dict[str, Log]],
-        bodymass_log: dict,
-        user_profile: dict = None,
-    ):
+        bodymass_log: Dict[str, Any],
+        user_profile: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """
+        Initialize the TrainingLogProcessor with session datasets and formatting configs.
+
+        :param output_path: Destination path for the generated Excel workbook.
+        :param exercises: Registered exercise definitions.
+        :param user_data: User workout logs keyed by date.
+        :param bodymass_log: Historical body mass and measurement logs keyed by date.
+        :param user_profile: User profile dictionary containing metadata and preferences.
+        :return: None.
+        """
         self.output_path = output_path
         self.exercises = exercises
         self.user_data = user_data
@@ -135,7 +169,12 @@ class TrainingLogProcessor:
 
         self._init_styles()
 
-    def _init_styles(self):
+    def _init_styles(self) -> None:
+        """
+        Initialize cell formatting styles, fonts, borders, and color fills for workbook generation.
+
+        :return: None.
+        """
         self.style_header_main = self.wb.add_format(
             {
                 "bold": True,
@@ -195,8 +234,13 @@ class TrainingLogProcessor:
             "Elite": self.wb.add_format({"bg_color": "#f0f921", "align": "left"}),
         }
 
-    def validate_data(self):
-        """Check for mismatched reps and masses in user data."""
+    def validate_data(self) -> None:
+        """
+        Verify that rep and mass list lengths match across all logged workout sets.
+
+        :raises ValueError: If a mismatch between reps and masses is encountered.
+        :return: None.
+        """
         for date_str, exercises in self.user_data.items():
             for ex_id, log in exercises.items():
                 if not isinstance(log, Log):  # skip Day and any future metadata
@@ -213,12 +257,22 @@ class TrainingLogProcessor:
 
     # ------------------------------------------------------------------
     @staticmethod
-    def _get_session_day(day_data: dict):
-        """Return the raw day value (int or str) from a session dict, or None."""
+    def _get_session_day(day_data: Dict[str, Any]) -> Optional[Any]:
+        """
+        Extract raw day value from a session dictionary if present.
+
+        :param day_data: Session log dictionary.
+        :return: Integer or string day marker, or None if absent.
+        """
         val = day_data.get("day")
         return val if isinstance(val, (int, str)) else None
 
-    def write_headers(self):
+    def write_headers(self) -> None:
+        """
+        Write worksheet column headers, exercise section titles, and freeze panes for Data_Log.
+
+        :return: None.
+        """
         self.ws_data.write(0, 0, "Date", self.style_header_main)
         self.ws_data.write(1, 0, "", self.style_header_main)
         self.ws_data.set_column(0, 0, 12)
@@ -257,7 +311,12 @@ class TrainingLogProcessor:
         self.ws_data.freeze_panes(2, 1)
         self.row_cursor = 2
 
-    def write_definitions(self):
+    def write_definitions(self) -> None:
+        """
+        Populate the Definitions worksheet with descriptions of all calculated metrics.
+
+        :return: None.
+        """
         self.ws_definitions.set_column(0, 0, 25)
         self.ws_definitions.set_column(1, 1, 80)
 
@@ -303,7 +362,13 @@ class TrainingLogProcessor:
             self.ws_definitions.write(i, 0, metric, self.style_def_text)
             self.ws_definitions.write(i, 1, desc, self.style_def_text)
 
-    def process_data(self, data: Dict[str, Dict[str, Log]]):
+    def process_data(self, data: Dict[str, Dict[str, Log]]) -> None:
+        """
+        Process chronological workout logs and populate rows in the Data_Log worksheet.
+
+        :param data: Dictionary mapping date strings to exercise log entries.
+        :return: None.
+        """
         if not data:
             return
 
@@ -534,7 +599,12 @@ class TrainingLogProcessor:
                         )
             self.row_cursor += 1
 
-    def write_calculations(self):
+    def write_calculations(self) -> None:
+        """
+        Populate the Calculations worksheet with volume rankings, weekly totals, and measurements.
+
+        :return: None.
+        """
         self.ws_calculations.write(0, 0, "Exercise", self.style_header_sub)
         self.ws_calculations.write(0, 1, "Total Volume", self.style_header_sub)
 
@@ -629,11 +699,15 @@ class TrainingLogProcessor:
             td_row += 1
         self.td_total_rows = td_row - 1  # total rows written in training-day table
 
-    def write_personal_records(self):
-        """Two side-by-side tables: Training PRs (left) and PR-session bests (right)."""
+    def write_personal_records(self) -> None:
+        """
+        Write Training PRs and PR-session bests side-by-side into Personal_Records worksheet.
+
+        :return: None.
+        """
         from core.standards import get_exercise_standard
 
-        def _find_pr(exercises, filter_fn):
+        def _find_pr(exercises: List[Exercise], filter_fn: Callable[[Optional[Any]], bool]) -> Dict[str, Tuple[float, str]]:
             """Return {ex_id: (max_mass, date)} filtered by filter_fn(session_day)."""
             result = {}
             for ex in exercises:
@@ -665,7 +739,7 @@ class TrainingLogProcessor:
             self.exercises, lambda d: isinstance(d, str) and d.upper() == "PR"
         )
 
-        def _write_table(ws, col_offset, title, prs_dict):
+        def _write_table(ws: Any, col_offset: int, title: str, prs_dict: Dict[str, Tuple[float, str]]) -> None:
             ws.set_column(col_offset, col_offset, 25)
             ws.set_column(col_offset + 1, col_offset + 1, 14)
             ws.set_column(col_offset + 2, col_offset + 2, 14)
@@ -704,7 +778,16 @@ class TrainingLogProcessor:
 
     def _create_summary_chart(
         self, metric_key: str, chart_title: str, y_axis_label: str, cell_position: str
-    ):
+    ) -> None:
+        """
+        Build and insert a multi-exercise summary line chart into Progress_Charts.
+
+        :param metric_key: Metric identifier matching column mappings (e.g. 'Est 1RM').
+        :param chart_title: Title string displayed on chart header.
+        :param y_axis_label: Label displayed on the Y-axis.
+        :param cell_position: Top-left cell coordinate string for placement (e.g. 'B2').
+        :return: None.
+        """
         width = CHART_CONFIG["summary"]["width"]
         height = CHART_CONFIG["summary"]["height"]
 
@@ -737,6 +820,12 @@ class TrainingLogProcessor:
         self.ws_charts.insert_chart(cell_position, chart)
 
     def _create_body_comp_chart(self, cell_position: str) -> int:
+        """
+        Build and insert body composition trend chart with primary and secondary axes.
+
+        :param cell_position: Top-left cell coordinate string for chart placement.
+        :return: Total row height consumed by the inserted chart.
+        """
         if self.bw_rows == 0:
             return 0
 
@@ -785,12 +874,29 @@ class TrainingLogProcessor:
         return self._pixels_to_rows(CHART_CONFIG["summary"]["height"]) + 2
 
     def _pixels_to_rows(self, pixels: int) -> int:
+        """
+        Convert pixel dimension to approximate Excel row count.
+
+        :param pixels: Pixel height.
+        :return: Number of Excel rows.
+        """
         return int(pixels / 20) + 1
 
     def _pixels_to_cols(self, pixels: int) -> int:
+        """
+        Convert pixel dimension to approximate Excel column count.
+
+        :param pixels: Pixel width.
+        :return: Number of Excel columns.
+        """
         return int(round(pixels / 64))
 
-    def generate_charts(self):
+    def generate_charts(self) -> None:
+        """
+        Generate and insert all progress charts, breakdowns, and progression curves into Progress_Charts.
+
+        :return: None.
+        """
         w_summary = CHART_CONFIG["summary"]["width"]
         h_summary = CHART_CONFIG["summary"]["height"]
         w_pie = CHART_CONFIG["pie"]["width"]
@@ -1227,7 +1333,12 @@ class TrainingLogProcessor:
 
             chart_pos_y += self._pixels_to_rows(h_indiv) + 2
 
-    def write_user_profile(self):
+    def write_user_profile(self) -> None:
+        """
+        Populate the User_Profile worksheet with athlete demographics and overall gym statistics.
+
+        :return: None.
+        """
         self.ws_user_profile.set_column(0, 0, 25)
         self.ws_user_profile.set_column(1, 1, 40)
 
@@ -1263,7 +1374,7 @@ class TrainingLogProcessor:
         # Gym stats
         from core.plan_generator import calculate_gym_stats
         stats = calculate_gym_stats(self.user_data)
-        
+
         start_row = len(fields) + 3
         self.ws_user_profile.write(start_row, 0, "Gym Statistics", self.style_def_header)
         self.ws_user_profile.write(start_row, 1, "", self.style_def_header)
@@ -1281,10 +1392,11 @@ class TrainingLogProcessor:
             self.ws_user_profile.write(j, 0, label, self.style_def_text)
             self.ws_user_profile.write(j, 1, value, self.style_def_text)
 
-    def save(self):
-        """Close and write the workbook to disk.
-        NOTE: write_personal_records() and write_user_profile() must be called
-        by the caller BEFORE calling save().
+    def save(self) -> None:
+        """
+        Finalize, close, and commit the generated Excel workbook file to disk.
+
+        :return: None.
         """
         try:
             self.wb.close()

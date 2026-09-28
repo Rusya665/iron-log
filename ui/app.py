@@ -15,8 +15,12 @@ from ui.bridge import WebViewBridgeApi  # noqa: E402
 from ui.templates import HTML_TEMPLATE  # noqa: E402
 
 
-def run_webview_app():
-    """Initializes and runs the PyWebView desktop application."""
+def run_webview_app() -> None:
+    """
+    Initialize and run the PyWebView desktop application window.
+
+    :return: None.
+    """
     api = WebViewBridgeApi()
     main_window = webview.create_window(
         title=f"Iron Log - Strength Tracker v{__version__} (PyWebView Edition)",

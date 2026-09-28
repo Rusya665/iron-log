@@ -1,16 +1,24 @@
+import math
 import re
+from typing import Any, Dict, Optional
 
 
 def get_exercise_standard(
     exercise_id: str,
     target_date_str: str,
-    bodymass_log: dict,
+    bodymass_log: Dict[str, Any],
     level: str = "Intermediate",
-    sex: str = None,
+    sex: Optional[str] = None,
 ) -> int:
     """
-    Retrieves the exercise standard from the consolidated EXERCISE_STANDARDS dictionary.
-    Requires an exact match on the exercise_id (slug) or normalized display name.
+    Retrieve standard lifted mass target for exercise and date from standards database.
+
+    :param exercise_id: Canonical exercise slug or display name.
+    :param target_date_str: Date string formatted as YYYY-MM-DD to resolve closest body mass.
+    :param bodymass_log: Dictionary mapping date strings to body mass records.
+    :param level: Strength tier ("Beginner", "Novice", "Intermediate", "Advanced", "Elite").
+    :param sex: Biological sex ("male" or "female").
+    :return: Target lifted weight in kilograms, or 0 if unmapped.
     """
     if sex is None:
         try:
@@ -18,7 +26,7 @@ def get_exercise_standard(
 
             sex = sessions.USER_SEX
         except (ImportError, AttributeError):
-            sex = "male"  # Fallback
+            sex = "male"
 
     if not bodymass_log or not exercise_id:
         return 0
@@ -38,7 +46,6 @@ def get_exercise_standard(
                 break
 
     if not applicable_date:
-        # Fallback to the first date with a valid bodyweight
         for d in dates:
             bm_data = bodymass_log[d]
             bm = bm_data if isinstance(bm_data, (int, float)) else (bm_data.get("mass") or bm_data.get("weight"))
@@ -59,13 +66,11 @@ def get_exercise_standard(
     if not current_bm:
         return 0
 
-    import math
     rounded_bm = int(math.ceil(round(current_bm, 2) / 5.0) * 5)
     rounded_bm = max(50, min(rounded_bm, 140))
 
-    # Strict lookup
-    found_slug = None
     target_norm = exercise_id.lower().strip().replace(" ", "-")
+    found_slug = None
 
     if target_norm in EXERCISE_STANDARDS:
         found_slug = target_norm
@@ -90,16 +95,22 @@ def get_exercise_standard(
     return gender_table[clipped_bm].get(level, 0)
 
 
-def get_tiered_standards(exercise_id: str, sex: str, body_mass: float = None):
+def get_tiered_standards(
+    exercise_id: str,
+    sex: str,
+    body_mass: Optional[float] = None,
+) -> Optional[Dict[int, Dict[str, int]]]:
     """
-    Returns a dictionary of standards for the given exercise and sex.
-    If body_mass is provided, returns 3 tiers: [rounded_mass-5, rounded_mass, rounded_mass+5].
-    Otherwise returns all available tiers for that exercise.
+    Return dictionary of strength standards across bodyweight tiers for an exercise and sex.
+
+    :param exercise_id: Canonical exercise slug or display name.
+    :param sex: Biological sex ("male" or "female").
+    :param body_mass: Optional body mass in kg to return 3 adjacent tiers around user weight class.
+    :return: Dictionary mapping bodyweight tiers (kg) to tier level target weights, or None.
     """
     if not exercise_id:
         return None
 
-    # Normalize lookup (same logic as in get_exercise_standard)
     target_norm = exercise_id.lower().strip().replace(" ", "-")
     found_slug = None
 
@@ -125,15 +136,12 @@ def get_tiered_standards(exercise_id: str, sex: str, body_mass: float = None):
     if body_mass is None or body_mass <= 0:
         return gender_table
 
-    import math
     rounded_bm = int(math.ceil(round(body_mass, 2) / 5.0) * 5)
 
     results = {}
     for offset in [-5, 0, 5]:
         target_bm = rounded_bm + offset
-        # Clip to available ranges in the database
         clipped_bm = max(available_bms[0], min(target_bm, available_bms[-1]))
-        # We store under the 'requested' tier key even if clipped, for UI consistency
         results[target_bm] = gender_table[clipped_bm]
 
     return results

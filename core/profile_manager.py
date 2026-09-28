@@ -21,6 +21,20 @@ ROOT_PROFILES_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..
 
 
 class Profile:
+    """
+    User configuration profile data.
+
+    :param name: Athlete display name.
+    :param sessions_dir: Directory path containing sessions.py.
+    :param output_dir: Directory path where generated Excel logs are saved.
+    :param age: Optional athlete age in years.
+    :param sex: Biological sex ("male" or "female") for strength standards.
+    :param mass: Athlete bodyweight in kilograms (0.0 if resolved from session logs).
+    :param show_pr: Whether personal record milestones are displayed.
+    :param show_standards: Whether strength standards tiers are displayed.
+    :param show_milestones: Whether progression milestones are highlighted.
+    """
+
     def __init__(
         self,
         name: str,
@@ -32,18 +46,23 @@ class Profile:
         show_pr: bool = True,
         show_standards: bool = True,
         show_milestones: bool = True,
-    ):
-        self.name = name
-        self.sessions_dir = sessions_dir
-        self.output_dir = output_dir
-        self.age = age
-        self.sex = sex
-        self.mass = mass
-        self.show_pr = show_pr
-        self.show_standards = show_standards
-        self.show_milestones = show_milestones
+    ) -> None:
+        self.name: str = name
+        self.sessions_dir: str = sessions_dir
+        self.output_dir: str = output_dir
+        self.age: int = age
+        self.sex: str = sex
+        self.mass: float = mass
+        self.show_pr: bool = show_pr
+        self.show_standards: bool = show_standards
+        self.show_milestones: bool = show_milestones
 
-    def to_dict(self):
+    def to_dict(self) -> dict:
+        """
+        Convert profile attributes to JSON-serializable dictionary.
+
+        :return: Dictionary representation of the profile.
+        """
         return {
             "name": self.name,
             "sessions_dir": self.sessions_dir,
@@ -58,15 +77,23 @@ class Profile:
 
 
 class ProfileManager:
-    def __init__(self):
+    """
+    Manager for loading, saving, and switching athlete user profiles.
+    """
+
+    def __init__(self) -> None:
         self.profiles: List[Profile] = []
         self.active_profile_index: int = -1
         self.remember_last_user: bool = True
         self.auto_check_updates: bool = True
         self.load_profiles()
 
-    def load_profiles(self):
-        # Auto-migrate from root profiles.json if AppData profiles.json does not exist yet
+    def load_profiles(self) -> None:
+        """
+        Load stored profiles from disk, migrating legacy configs if necessary.
+
+        :return: None
+        """
         if not os.path.exists(PROFILES_FILE) and os.path.exists(ROOT_PROFILES_FILE):
             try:
                 import shutil
@@ -75,7 +102,6 @@ class ProfileManager:
                 print(f"Migration from root profiles.json failed: {e}")
 
         if not os.path.exists(PROFILES_FILE):
-            # Attempt to migrate from legacy config
             if os.path.exists(LEGACY_CONFIG):
                 try:
                     with open(LEGACY_CONFIG, "r") as f:
@@ -103,17 +129,20 @@ class ProfileManager:
                 self.auto_check_updates = data.get("auto_check_updates", True)
         except Exception as e:
             print(f"Error loading profiles: {e}")
-            # Reset to safe defaults if file is corrupted
             self.profiles = []
             self.active_profile_index = -1
 
-        # Sanitize index
         if not self.profiles:
             self.active_profile_index = -1
         elif self.active_profile_index < 0 or self.active_profile_index >= len(self.profiles):
             self.active_profile_index = 0
 
-    def save_profiles(self):
+    def save_profiles(self) -> None:
+        """
+        Persist all registered profiles and active settings to JSON storage.
+
+        :return: None
+        """
         data = {
             "active_profile_index": self.active_profile_index,
             "remember_last_user": self.remember_last_user,
@@ -124,32 +153,61 @@ class ProfileManager:
             json.dump(data, f, indent=4)
 
     def get_active_profile(self) -> Optional[Profile]:
+        """
+        Retrieve currently active user profile.
+
+        :return: Active Profile object or None if no profiles exist.
+        """
         if 0 <= self.active_profile_index < len(self.profiles):
             return self.profiles[self.active_profile_index]
         return None
 
-    def add_profile(self, profile: Profile):
+    def add_profile(self, profile: Profile) -> None:
+        """
+        Add a new profile to the registry and save.
+
+        :param profile: Profile instance to register.
+        :return: None
+        """
         self.profiles.append(profile)
         if self.active_profile_index == -1:
             self.active_profile_index = 0
         self.save_profiles()
 
-    def set_active(self, index: int):
+    def set_active(self, index: int) -> None:
+        """
+        Switch active profile by index.
+
+        :param index: 0-based profile index.
+        :return: None
+        """
         if 0 <= index < len(self.profiles):
             self.active_profile_index = index
             self.save_profiles()
 
-    def delete_profile(self, index: int):
+    def delete_profile(self, index: int) -> None:
+        """
+        Delete a profile by index and update active profile pointer.
+
+        :param index: 0-based profile index to delete.
+        :return: None
+        """
         if 0 <= index < len(self.profiles):
             self.profiles.pop(index)
-            # Adjust active index
             if not self.profiles:
                 self.active_profile_index = -1
             elif self.active_profile_index >= len(self.profiles):
                 self.active_profile_index = len(self.profiles) - 1
             self.save_profiles()
 
-    def update_profile(self, index: int, profile: Profile):
+    def update_profile(self, index: int, profile: Profile) -> None:
+        """
+        Update profile data at specified index and save.
+
+        :param index: 0-based profile index to overwrite.
+        :param profile: Updated Profile instance.
+        :return: None
+        """
         if 0 <= index < len(self.profiles):
             self.profiles[index] = profile
             self.save_profiles()

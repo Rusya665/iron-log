@@ -27,6 +27,11 @@ class ReleaseManager(tk.Tk):
     """
 
     def __init__(self) -> None:
+        """
+        Initialize ReleaseManager UI window, geometry, and kick off version lookup.
+
+        :return: None.
+        """
         super().__init__()
 
         self.title("Iron Log - Release Manager")
@@ -39,6 +44,11 @@ class ReleaseManager(tk.Tk):
         threading.Thread(target=self._fetch_latest_version, daemon=True).start()
 
     def _get_sorted_branches(self) -> List[str]:
+        """
+        Retrieve list of local git branches sorted by most recent committer date.
+
+        :return: List of branch name strings.
+        """
         try:
             output = self._run_git(
                 [
@@ -54,12 +64,22 @@ class ReleaseManager(tk.Tk):
             return ["main"]
 
     def _get_current_branch(self) -> str:
+        """
+        Query git for the currently checked out branch name.
+
+        :return: Active branch name string.
+        """
         try:
             return self._run_git(["git", "branch", "--show-current"]).strip()
         except Exception:
             return "main"
 
     def _build_ui(self) -> None:
+        """
+        Construct UI widgets, frames, version inputs, and push button.
+
+        :return: None.
+        """
         hdr = tk.Frame(self, bg="#1a1a1a")
         hdr.pack(fill="x")
         tk.Label(hdr, text="Release Manager", font=("Helvetica", 20, "bold"), fg="#ffffff", bg="#1a1a1a").pack(
@@ -174,6 +194,12 @@ class ReleaseManager(tk.Tk):
         self.push_btn.pack(fill="x")
 
     def _switch_branch(self, branch_name: str) -> None:
+        """
+        Switch active git branch via git checkout.
+
+        :param branch_name: Target branch name to check out.
+        :return: None.
+        """
         try:
             self._run_git(["git", "checkout", branch_name])
             self._log(f"Switched to branch: {branch_name}", "#4caf50")
@@ -187,6 +213,11 @@ class ReleaseManager(tk.Tk):
             self.branch_var.set(self._get_current_branch())
 
     def _fetch_latest_version(self) -> None:
+        """
+        Query GitHub Releases API for the latest published release tag.
+
+        :return: None.
+        """
         try:
             response = requests.get(RELEASES_URL, timeout=5)
             response.raise_for_status()
@@ -209,9 +240,21 @@ class ReleaseManager(tk.Tk):
             )
 
     def _log(self, text: str, color: str = "#888888") -> None:
+        """
+        Update status label text and color on the main UI thread.
+
+        :param text: Status message to display.
+        :param color: Hex color code string for label text.
+        :return: None.
+        """
         self.after(0, lambda: self.status_label.config(text=text, fg=color))
 
     def _on_push_pressed(self) -> None:
+        """
+        Validate form inputs, confirm deployment prompt, and start background release sequence.
+
+        :return: None.
+        """
         new_v = self.new_v_entry.get().strip()
         commit_msg = self.commit_msg_box.get("1.0", "end-1c").strip()
         release_msg = self.release_msg_box.get("1.0", "end-1c").strip()
@@ -260,6 +303,15 @@ class ReleaseManager(tk.Tk):
     def _execute_sequence(
         self, new_v: str, commit_msg: str, release_msg: str, target_branch: str
     ) -> None:
+        """
+        Execute version file updates, git commit, tag, and push sequence.
+
+        :param new_v: Semantic version string (e.g. '2.0.5').
+        :param commit_msg: Commit message text for git history.
+        :param release_msg: Release notes text for GitHub Releases.
+        :param target_branch: Target branch to push release commits and tags to.
+        :return: None.
+        """
         tag_name = f"v{new_v}"
         initial_hash = None
 
@@ -326,6 +378,13 @@ class ReleaseManager(tk.Tk):
             )
 
     def _handle_failure(self, initial_hash: Optional[str], error_message: str) -> None:
+        """
+        Reset local git repository to pre-release state and display error dialog.
+
+        :param initial_hash: Git commit hash before deployment started.
+        :param error_message: Error description string.
+        :return: None.
+        """
         if initial_hash:
             try:
                 self._run_git(["git", "reset", "--hard", initial_hash])
@@ -340,6 +399,14 @@ class ReleaseManager(tk.Tk):
         )
 
     def _update_file(self, path: str, pattern: str, replacement: str) -> None:
+        """
+        Perform regular expression pattern substitution in a target file on disk.
+
+        :param path: Absolute path to target file.
+        :param pattern: Regular expression pattern string to match.
+        :param replacement: Replacement string to substitute.
+        :return: None.
+        """
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
         new_content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
@@ -347,6 +414,13 @@ class ReleaseManager(tk.Tk):
             f.write(new_content)
 
     def _run_git(self, cmd: List[str]) -> str:
+        """
+        Run git subprocess command and return captured standard output.
+
+        :param cmd: Command arguments list.
+        :return: Standard output string from command.
+        :raises subprocess.CalledProcessError: If git command fails.
+        """
         result = subprocess.run(
             cmd, check=True, text=True, capture_output=True, cwd=ROOT_DIR, timeout=60
         )

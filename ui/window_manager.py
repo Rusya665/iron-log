@@ -8,29 +8,51 @@ _PLANNER_WINDOW: Optional[webview.Window] = None
 
 
 def get_main_window() -> Optional[webview.Window]:
-    """Returns the main application window instance."""
+    """
+    Retrieve the active main application window instance.
+
+    :return: Window instance if initialized, None otherwise.
+    """
     return _MAIN_WINDOW
 
 
 def set_main_window(window: Optional[webview.Window]) -> None:
-    """Sets the main application window instance."""
+    """
+    Assign the active main application window instance.
+
+    :param window: PyWebView Window instance or None when closed.
+    :return: None.
+    """
     global _MAIN_WINDOW
     _MAIN_WINDOW = window
 
 
 def get_planner_window() -> Optional[webview.Window]:
-    """Returns the standalone planner window instance."""
+    """
+    Retrieve the active standalone planner window instance.
+
+    :return: Planner Window instance if open, None otherwise.
+    """
     return _PLANNER_WINDOW
 
 
 def set_planner_window(window: Optional[webview.Window]) -> None:
-    """Sets the standalone planner window instance."""
+    """
+    Assign the active standalone planner window instance.
+
+    :param window: PyWebView Window instance or None when closed.
+    :return: None.
+    """
     global _PLANNER_WINDOW
     _PLANNER_WINDOW = window
 
 
 def close_planner_window() -> None:
-    """Safely closes the standalone planner window if open."""
+    """
+    Safely close and destroy the standalone planner window if open.
+
+    :return: None.
+    """
     global _PLANNER_WINDOW
     if _PLANNER_WINDOW:
         try:
@@ -41,7 +63,11 @@ def close_planner_window() -> None:
 
 
 def reload_main_dashboard() -> None:
-    """Triggers a dashboard reload in the main window."""
+    """
+    Execute JavaScript dashboard reload in the active main window.
+
+    :return: None.
+    """
     global _MAIN_WINDOW
     if _MAIN_WINDOW:
         try:
@@ -51,7 +77,11 @@ def reload_main_dashboard() -> None:
 
 
 def destroy_all_windows() -> None:
-    """Safely closes and destroys all active windows."""
+    """
+    Safely close and destroy all currently active PyWebView windows.
+
+    :return: None.
+    """
     global _MAIN_WINDOW, _PLANNER_WINDOW
     if _PLANNER_WINDOW:
         try:

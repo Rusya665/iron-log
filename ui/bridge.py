@@ -11,7 +11,7 @@ import threading
 import time
 import webbrowser
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import webview
 
@@ -40,7 +40,12 @@ from ui.templates import PLANNER_HTML_TEMPLATE
 class WebViewBridgeApi:
     """Python backend bridge API matching 100% of CustomTkinter engine features."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        Initialize WebViewBridgeApi with active profile manager and default update state.
+
+        :return: None.
+        """
         self.manager = ProfileManager()
         self.last_gen_time = ""
         self.update_status = {
@@ -51,7 +56,13 @@ class WebViewBridgeApi:
             "error": None,
         }
 
-    def _load_sessions(self, p: Profile):
+    def _load_sessions(self, p: Profile) -> Tuple[Optional[Any], str]:
+        """
+        Dynamically import or reload the user's sessions.py module from their profile directory.
+
+        :param p: Target user profile instance.
+        :return: Tuple containing loaded module (or None) and absolute sessions.py file path.
+        """
         sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
         if not os.path.exists(sessions_file):
             return None, sessions_file
@@ -66,8 +77,12 @@ class WebViewBridgeApi:
             import sessions as sess
         return sess, sessions_file
 
-    def open_planner_window(self):
-        """Spawns the Dynamic Plan Cycler as a dedicated standalone window."""
+    def open_planner_window(self) -> Dict[str, Any]:
+        """
+        Spawn or focus the standalone Dynamic Plan Cycler PyWebView window.
+
+        :return: Dictionary containing success indicator.
+        """
         planner_win = window_manager.get_planner_window()
         if planner_win:
             try:
@@ -89,6 +104,11 @@ class WebViewBridgeApi:
         return {"success": True}
 
     def get_settings(self) -> Dict[str, Any]:
+        """
+        Retrieve current application and active profile settings.
+
+        :return: Dictionary containing global and profile-specific preferences.
+        """
         p = self.manager.get_active_profile()
         return {
             "auto_login": self.manager.remember_last_user,
@@ -99,6 +119,12 @@ class WebViewBridgeApi:
         }
 
     def toggle_setting(self, setting_name: str) -> Dict[str, Any]:
+        """
+        Toggle a boolean application or profile setting and persist changes.
+
+        :param setting_name: Setting attribute identifier to toggle.
+        :return: Updated settings dictionary.
+        """
         p = self.manager.get_active_profile()
         if setting_name == "auto_login":
             self.manager.remember_last_user = not self.manager.remember_last_user
@@ -110,16 +136,35 @@ class WebViewBridgeApi:
         return self.get_settings()
 
     def get_profiles(self) -> Dict[str, Any]:
+        """
+        Retrieve all user profiles and the active profile index.
+
+        :return: Dictionary containing active index and list of profile dictionaries.
+        """
         return {
             "active_index": self.manager.active_profile_index,
             "profiles": [p.to_dict() for p in self.manager.profiles],
         }
 
     def select_profile(self, index: int) -> Dict[str, Any]:
+        """
+        Switch the active profile by index.
+
+        :param index: Zero-based index of target profile in profile manager list.
+        :return: Dictionary containing success indicator.
+        """
         self.manager.set_active(index)
         return {"success": True}
 
     def save_profile(self, profile_data: Dict[str, Any], is_edit: bool = False, index: int = 0) -> Dict[str, Any]:
+        """
+        Create or update a profile from UI modal form data.
+
+        :param profile_data: Profile fields dictionary containing name, sessions_dir, and sex.
+        :param is_edit: True to update existing profile at index, False to append new profile.
+        :param index: Target profile index if editing.
+        :return: Dictionary with success status and optional error message.
+        """
         name = profile_data.get("name", "").strip()
         s_dir = profile_data.get("sessions_dir", "").strip()
         sex = profile_data.get("sex", "male")
@@ -143,12 +188,23 @@ class WebViewBridgeApi:
         return {"success": True}
 
     def delete_profile(self, index: int) -> Dict[str, Any]:
+        """
+        Delete a profile by index.
+
+        :param index: Zero-based index of profile to delete.
+        :return: Dictionary with success status and optional error message.
+        """
         if 0 <= index < len(self.manager.profiles):
             self.manager.delete_profile(index)
             return {"success": True}
         return {"success": False, "error": "Invalid profile index"}
 
     def browse_folder(self) -> str:
+        """
+        Open a native directory chooser dialog to select a workouts folder.
+
+        :return: Selected absolute directory path, or empty string if cancelled.
+        """
         import tkinter as tk
         from tkinter import filedialog
         r = tk.Tk()
@@ -159,6 +215,11 @@ class WebViewBridgeApi:
         return path or ""
 
     def check_updates(self) -> Dict[str, Any]:
+        """
+        Check GitHub Releases for an available application update.
+
+        :return: Dictionary containing update status, version tags, URL, and release notes.
+        """
         info = get_update_details(__version__)
         return {
             "has_update": info["has_update"],
@@ -170,7 +231,12 @@ class WebViewBridgeApi:
         }
 
     def start_update(self, download_url: str) -> Dict[str, Any]:
-        """Initiates the background download and silent update process."""
+        """
+        Start worker thread to download the installer and execute silent update.
+
+        :param download_url: Remote asset URL for the installer executable.
+        :return: Status dictionary with success flag.
+        """
         self.update_status = {
             "state": "downloading",
             "downloaded": 0,
@@ -194,7 +260,6 @@ class WebViewBridgeApi:
             self.update_status["state"] = "installing"
             self.update_status["percent"] = 100.0
 
-            # Brief pause so frontend can render the "Restarting to install..." UI
             time.sleep(1.2)
 
             window_manager.destroy_all_windows()
@@ -204,10 +269,19 @@ class WebViewBridgeApi:
         return {"success": True}
 
     def get_update_status(self) -> Dict[str, Any]:
-        """Returns the current state of the update download / installation."""
+        """
+        Return the current state of the background update process.
+
+        :return: Dictionary containing state, downloaded bytes, total bytes, percent, and error.
+        """
         return self.update_status
 
     def get_active_data(self) -> Dict[str, Any]:
+        """
+        Load and return recent workout history, split metrics, and attendance stats for active profile.
+
+        :return: Dictionary containing profile name, aggregated stats, and recent sessions list.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No profile selected"}
@@ -305,12 +379,11 @@ class WebViewBridgeApi:
         }
 
     def _resolve_user_mass(self, explicit_mass: Optional[float] = None) -> Optional[float]:
-        """Resolves user mass dynamically without any hardcoded fallbacks.
-        Order of precedence:
-        1. Explicit mass passed (e.g. from session hover, if > 0)
-        2. Latest logged mass in sessions.py BODYMASS_LOG
-        3. Profile configured mass (if > 0)
-        Returns None if no mass is recorded anywhere.
+        """
+        Resolve user body mass from explicit input, workout session logs, or profile.
+
+        :param explicit_mass: Optional direct mass value from session hover.
+        :return: Resolved float body mass in kg, or None if unrecorded.
         """
         if explicit_mass is not None and float(explicit_mass) > 0:
             return float(explicit_mass)
@@ -334,9 +407,11 @@ class WebViewBridgeApi:
 
     @staticmethod
     def _calculate_target_bm(mass: Optional[float]) -> Optional[int]:
-        """Calculates target standard tier without hardcoded fallbacks.
-        Uses weight class ceiling (5kg tiers: e.g. >85kg to 90kg -> 90).
-        Returns None if mass is not recorded.
+        """
+        Calculate target weight class tier using ceiling rounding into 5kg buckets.
+
+        :param mass: User body mass in kg.
+        :return: Integer target bodyweight tier in kg, or None.
         """
         if mass is None or mass <= 0:
             return None
@@ -344,6 +419,13 @@ class WebViewBridgeApi:
         return int(math.ceil(round(mass, 2) / 5.0) * 5)
 
     def get_exercise_standards_table(self, exercise_id: str, mass: Optional[float] = None) -> Dict[str, Any]:
+        """
+        Fetch full standards table for an exercise and compute the user's target weight tier.
+
+        :param exercise_id: Canonical slug or display name of the exercise.
+        :param mass: Optional explicit session mass in kg.
+        :return: Dictionary containing exercise ID, display name, target bodyweight, and standards dict.
+        """
         p = self.manager.get_active_profile()
         sex = getattr(p, "sex", "male") if p else "male"
         resolved_mass = self._resolve_user_mass(mass)
@@ -358,6 +440,11 @@ class WebViewBridgeApi:
         }
 
     def generate_excel(self) -> Dict[str, Any]:
+        """
+        Run the complete Excel generation pipeline for active profile and launch output workbook.
+
+        :return: Dictionary with success status, generation timestamp, or error message.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No profile"}
@@ -397,6 +484,11 @@ class WebViewBridgeApi:
             return {"success": False, "error": str(e)}
 
     def run_scraper(self) -> Dict[str, Any]:
+        """
+        Launch the strength standards scraper script as an external process.
+
+        :return: Dictionary with success status and optional error message.
+        """
         script_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "scripts", "batch_scraper.py"))
         try:
             subprocess.Popen([sys.executable, script_path])
@@ -405,6 +497,11 @@ class WebViewBridgeApi:
             return {"success": False, "error": str(e)}
 
     def run_validate_sessions(self) -> Dict[str, Any]:
+        """
+        Validate active profile sessions.py for set count mismatches and missing body mass records.
+
+        :return: Dictionary with validation results and dates with unrecorded body mass.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No active profile"}
@@ -457,6 +554,11 @@ class WebViewBridgeApi:
             return {"success": False, "error": f"Unexpected error: {e}"}
 
     def run_bodymass_prefill(self) -> Dict[str, Any]:
+        """
+        Pre-fill missing workout dates into BODYMASS_LOG with None mass values.
+
+        :return: Dictionary containing prefilled dates count and date list.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No active profile"}
@@ -496,6 +598,11 @@ class WebViewBridgeApi:
         return {"success": True, "count": len(missing), "dates": missing}
 
     def get_missing_masses(self) -> Dict[str, Any]:
+        """
+        Query BODYMASS_LOG for workout dates where mass is currently None.
+
+        :return: Dictionary containing list of date strings needing mass values.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No active profile"}
@@ -511,6 +618,12 @@ class WebViewBridgeApi:
         return {"success": True, "entries": none_entries}
 
     def save_missing_masses(self, updates: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Update placeholder None masses in sessions.py with user-provided float values.
+
+        :param updates: Dictionary mapping date strings to filled body mass values.
+        :return: Dictionary containing count of updated entries.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No active profile"}
@@ -544,6 +657,11 @@ class WebViewBridgeApi:
         return {"success": True, "count": count}
 
     def get_plan(self) -> Dict[str, Any]:
+        """
+        Generate suggested workout plan for the upcoming split cycle.
+
+        :return: Dictionary containing planned session list, rationale, or error message.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No profile"}
@@ -589,6 +707,13 @@ class WebViewBridgeApi:
     def restore_pre_deload(
         self, day_numbers: Optional[List[int]] = None, scale_pct: float = 100.0
     ) -> Dict[str, Any]:
+        """
+        Restore training plan baseline from last clean non-deload cycle scaled by a percentage.
+
+        :param day_numbers: Optional list of cycle day numbers to restore.
+        :param scale_pct: Target scaling percentage applied to mass (default: 100.0).
+        :return: Dictionary containing restored planned sessions or error message.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No profile"}
@@ -641,6 +766,12 @@ class WebViewBridgeApi:
             return {"success": False, "error": str(e)}
 
     def save_plan(self, planned_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Write confirmed planned sessions into sessions.py and refresh the dashboard.
+
+        :param planned_data: Serialized list of confirmed planned sessions and exercises.
+        :return: Dictionary with success status or error message.
+        """
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No profile"}
@@ -675,6 +806,12 @@ class WebViewBridgeApi:
             return {"success": False, "error": str(e)}
 
     def search_standards(self, query: str) -> List[Dict[str, Any]]:
+        """
+        Search strength standards library for exercises matching a query string.
+
+        :param query: Search query matching exercise name or slug.
+        :return: List of exercise standards records for the user's weight class.
+        """
         p = self.manager.get_active_profile()
         sex = getattr(p, "sex", "male") if p else "male"
         resolved_mass = self._resolve_user_mass()
@@ -702,7 +839,13 @@ class WebViewBridgeApi:
             })
         return results
 
-    def copy_clipboard(self, text: str):
+    def copy_clipboard(self, text: str) -> None:
+        """
+        Copy text string to system clipboard using Tkinter.
+
+        :param text: Text string to copy.
+        :return: None.
+        """
         import tkinter as tk
         r = tk.Tk()
         r.withdraw()
@@ -711,29 +854,55 @@ class WebViewBridgeApi:
         r.update()
         r.destroy()
 
-    def open_url(self, url: str):
+    def open_url(self, url: str) -> None:
+        """
+        Open web URL in user's default external browser.
+
+        :param url: URL string to navigate to.
+        :return: None.
+        """
         webbrowser.open(url)
 
-    def open_latest_excel(self):
+    def open_latest_excel(self) -> None:
+        """
+        Open the most recently generated Excel workbook in active profile's output directory.
+
+        :return: None.
+        """
         p = self.manager.get_active_profile()
         if p and p.output_dir and os.path.exists(p.output_dir):
             files = sorted(glob.glob(os.path.join(p.output_dir, "Training_Log_*.xlsx")), reverse=True)
             if files:
                 os.startfile(files[0])
 
-    def edit_sessions(self):
+    def edit_sessions(self) -> None:
+        """
+        Open active profile's sessions.py file in the system default text editor.
+
+        :return: None.
+        """
         p = self.manager.get_active_profile()
         if p and p.sessions_dir:
             f = os.path.join(p.sessions_dir, "sessions.py")
             if os.path.exists(f):
                 os.startfile(f)
 
-    def open_output(self):
+    def open_output(self) -> None:
+        """
+        Open active profile's Excel output folder in system file explorer.
+
+        :return: None.
+        """
         p = self.manager.get_active_profile()
         if p and p.output_dir and os.path.exists(p.output_dir):
             os.startfile(p.output_dir)
 
-    def open_app_data_folder(self):
+    def open_app_data_folder(self) -> None:
+        """
+        Open application configuration directory in system file explorer.
+
+        :return: None.
+        """
         if getattr(sys, "frozen", False):
             path = os.path.join(os.environ.get("APPDATA", os.path.expanduser("~")), "IronLog")
         else:

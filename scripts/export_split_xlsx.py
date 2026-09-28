@@ -32,7 +32,11 @@ from core.profile_manager import PROFILES_FILE
 
 
 def _get_default_paths() -> Tuple[str, str]:
-    """Dynamically resolve default paths from local git-ignored config without hardcoding personal folders."""
+    """
+    Dynamically resolve default paths for sessions.py and output excel file from local user profile.
+
+    :return: Tuple containing (sessions_path, output_path).
+    """
     sessions_file = os.path.join(PROJECT_ROOT, "sessions.py")
     out_file = os.path.join(PROJECT_ROOT, "dist", "Latest_Split_Tracker.xlsx")
 
@@ -60,6 +64,11 @@ def _get_default_paths() -> Tuple[str, str]:
 
 
 def _parse_cli_args() -> argparse.Namespace:
+    """
+    Parse command-line arguments for split tracker generation.
+
+    :return: Parsed argument namespace.
+    """
     default_sessions_file, default_out_file = _get_default_paths()
 
     parser = argparse.ArgumentParser(
@@ -86,8 +95,15 @@ def _parse_cli_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_sessions_module(sessions_path: str):
-    """Load sessions.py dynamically as a module."""
+def load_sessions_module(sessions_path: str) -> Any:
+    """
+    Dynamically import sessions.py from a specified file path.
+
+    :param sessions_path: Absolute or relative path to sessions.py.
+    :return: Imported module object.
+    :raises FileNotFoundError: If the file does not exist.
+    :raises ImportError: If the module loader fails.
+    """
     if not os.path.exists(sessions_path):
         raise FileNotFoundError(f"sessions.py not found at {sessions_path}")
 
@@ -107,7 +123,12 @@ def load_sessions_module(sessions_path: str):
 
 
 def extract_comments(sessions_path: str) -> Dict[str, Dict[str, str]]:
-    """Parse comments per exercise and per date from sessions.py."""
+    """
+    Parse inline comments per exercise and per workout date from sessions.py source code.
+
+    :param sessions_path: Path to sessions.py file.
+    :return: Nested dictionary mapping date strings and variable names to comment strings.
+    """
     with open(sessions_path, "r", encoding="utf-8", errors="ignore") as f:
         raw_content = f.read()
 
@@ -130,8 +151,13 @@ def extract_comments(sessions_path: str) -> Dict[str, Dict[str, str]]:
     return comments_by_date_ex
 
 
-def format_reps(reps: list) -> Any:
-    """Format reps list for display."""
+def format_reps(reps: List[float]) -> Any:
+    """
+    Format repetition list for display in split tracker cells.
+
+    :param reps: List of repetition counts.
+    :return: Formatted string or integer.
+    """
     if not reps:
         return ""
     if len(set(reps)) == 1:
@@ -140,8 +166,13 @@ def format_reps(reps: list) -> Any:
     return ", ".join(str(int(r) if isinstance(r, (int, float)) and float(r).is_integer() else r) for r in reps)
 
 
-def format_mass(mass: list) -> Any:
-    """Format mass list for display."""
+def format_mass(mass: List[float]) -> Any:
+    """
+    Format mass list for display in split tracker cells.
+
+    :param mass: List of mass values in kg.
+    :return: Formatted string or integer.
+    """
     if not mass:
         return ""
     if len(set(mass)) == 1:
@@ -151,7 +182,12 @@ def format_mass(mass: list) -> Any:
 
 
 def get_display_name(ex_id: str) -> str:
-    """Map exercise ID/slug to human-friendly display name."""
+    """
+    Map exercise slug or ID to a user-friendly display name.
+
+    :param ex_id: Exercise identifier or slug.
+    :return: Formatted display name string.
+    """
     if ex_id in EXERCISE_STANDARDS:
         return EXERCISE_STANDARDS[ex_id].get("name", ex_id.replace("_", " ").replace("-", " ").title())
     cleaned = ex_id.replace("_", " ").replace("-", " ")
@@ -159,7 +195,15 @@ def get_display_name(ex_id: str) -> str:
 
 
 def generate_classic_tracker(sessions_path: str, output_path: str, min_weeks: int = 5) -> str:
-    """Generate the classic-style Excel workbook from sessions.py data."""
+    """
+    Generate classic-style multi-week split tracker workbook from workout data.
+
+    :param sessions_path: Path to sessions.py file.
+    :param output_path: Output Excel file destination path.
+    :param min_weeks: Minimum number of weekly cycle columns to scaffold.
+    :return: Absolute path of written Excel workbook.
+    :raises ValueError: If no active split sessions are found in user data.
+    """
     # 1. Load user data and extract comments
     mod = load_sessions_module(sessions_path)
     user_data = getattr(mod, "USER_DATA", {})
@@ -361,7 +405,12 @@ def generate_classic_tracker(sessions_path: str, output_path: str, min_weeks: in
     return output_path
 
 
-def main():
+def main() -> None:
+    """
+    CLI entry point for exporting classic split tracker workbook.
+
+    :return: None.
+    """
     args = _parse_cli_args()
     sessions_path = args.sessions_path
     output_path = args.out

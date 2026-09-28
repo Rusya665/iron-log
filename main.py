@@ -6,19 +6,30 @@ import sys
 sys.path.append(os.path.dirname(__file__))
 
 
-def run_gui():
+def run_gui() -> None:
+    """
+    Launch the desktop PyWebView application window.
+
+    :return: None
+    """
     from ui.desktop import run_desktop_app
     run_desktop_app()
 
 
-def run_cli(args):
+def run_cli(args: argparse.Namespace) -> None:
+    """
+    Execute training log generation from terminal CLI arguments.
+
+    :param args: Parsed command-line arguments namespace.
+    :return: None
+    """
     from datetime import datetime
     from core.config import get_config
     from core.xlsx_generator import TrainingLogProcessor
 
     config = get_config(reconfigure=args.reconfigure, cli_mode=True)
-    sessions_dir = config.get("sessions_dir")
-    output_dir = config.get("output_dir")
+    sessions_dir = config.get("sessions_dir", "")
+    output_dir = config.get("output_dir", "")
 
     if sessions_dir not in sys.path:
         sys.path.insert(0, sessions_dir)
@@ -32,8 +43,12 @@ def run_cli(args):
     timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     filename = os.path.join(output_dir, f"Training_Log_{timestamp}.xlsx")
 
-    # Pass an empty profile dict as CLI doesn't have profile awareness yet
-    app = TrainingLogProcessor(filename, sessions.EXERCISE_REGISTRY, sessions.USER_DATA, sessions.BODYMASS_LOG)
+    app = TrainingLogProcessor(
+        filename,
+        sessions.EXERCISE_REGISTRY,
+        sessions.USER_DATA,
+        sessions.BODYMASS_LOG,
+    )
     try:
         app.validate_data()
     except ValueError as ve:
@@ -56,9 +71,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Iron Log - Strength Tracker")
     parser.add_argument("--cli", action="store_true", help="Run in CLI mode")
     parser.add_argument("--reconfigure", action="store_true", help="[CLI Only] Prompt to reconfigure paths")
-    args = parser.parse_args()
+    cli_args = parser.parse_args()
 
-    if args.cli:
-        run_cli(args)
+    if cli_args.cli:
+        run_cli(cli_args)
     else:
         run_gui()

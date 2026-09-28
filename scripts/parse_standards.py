@@ -5,6 +5,7 @@ import sys
 import tkinter as tk
 from datetime import datetime
 from tkinter import messagebox, ttk
+from typing import Any, Dict, List, Optional
 
 # Core file paths
 CORE_DIR = os.path.join(os.path.dirname(__file__), "..", "core")
@@ -12,9 +13,14 @@ STANDARDS_FILE = os.path.join(CORE_DIR, "standards.py")
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config.json")
 
 
-def parse_raw_text(raw_text: str) -> dict:
-    """Parses raw text pasted from the strengthlevel.com tables or concatenated strings."""
-    parsed_data = {}
+def parse_raw_text(raw_text: str) -> Dict[int, Dict[str, int]]:
+    """
+    Parse raw strength level table text into structured body mass tiers.
+
+    :param raw_text: Raw multi-line string containing body mass and tier weights.
+    :return: Dictionary mapping body mass (kg) to tier level target weights.
+    """
+    parsed_data: Dict[int, Dict[str, int]] = {}
     lines = raw_text.strip().split("\n")
 
     for line in lines:
@@ -39,8 +45,14 @@ def parse_raw_text(raw_text: str) -> dict:
     return parsed_data
 
 
-def write_to_standards(exercise_id: str, data: dict):
-    """Updates the EXERCISE_STANDARDS dictionary in the standards file."""
+def write_to_standards(exercise_id: str, data: Dict[int, Dict[str, int]]) -> None:
+    """
+    Update the EXERCISE_STANDARDS dictionary in the standards module file.
+
+    :param exercise_id: Canonical exercise slug or identifier.
+    :param data: Dictionary mapping body mass (kg) to tier level target weights.
+    :return: None
+    """
     root_dir = os.path.join(os.path.dirname(__file__), "..")
     if root_dir not in sys.path:
         sys.path.append(root_dir)
@@ -51,58 +63,183 @@ def write_to_standards(exercise_id: str, data: dict):
     importlib.reload(standards)
     current_standards = getattr(standards, "EXERCISE_STANDARDS", {})
 
-    current_standards[exercise_id] = data
+    display_name = exercise_id.replace("-", " ").title()
+    if exercise_id in current_standards and isinstance(current_standards[exercise_id], dict) and "male" in current_standards[exercise_id]:
+        current_standards[exercise_id]["male"].update(data)
+    else:
+        current_standards[exercise_id] = {
+            "name": display_name,
+            "male": data,
+            "female": {},
+        }
 
-    header = '''import re
+    header = '''import math
+import re
+from typing import Any, Dict, Optional
 
-def get_exercise_standard(exercise_id: str, target_date_str: str, bodymass_log: dict, level: str = "Intermediate") -> int:
+
+def get_exercise_standard(
+    exercise_id: str,
+    target_date_str: str,
+    bodymass_log: Dict[str, Any],
+    level: str = "Intermediate",
+    sex: Optional[str] = None,
+) -> int:
     """
-    Retrieves the exercise standard from the consolidated EXERCISE_STANDARDS dictionary.
-    Requires an exact match on the exercise_id.
+    Retrieve standard lifted mass target for exercise and date from standards database.
+
+    :param exercise_id: Canonical exercise slug or display name.
+    :param target_date_str: Date string formatted as YYYY-MM-DD to resolve closest body mass.
+    :param bodymass_log: Dictionary mapping date strings to body mass records.
+    :param level: Strength tier ("Beginner", "Novice", "Intermediate", "Advanced", "Elite").
+    :param sex: Biological sex ("male" or "female").
+    :return: Target lifted weight in kilograms, or 0 if unmapped.
     """
+    if sex is None:
+        try:
+            import sessions
+
+            sex = sessions.USER_SEX
+        except (ImportError, AttributeError):
+            sex = "male"
+
     if not bodymass_log or not exercise_id:
         return 0
-        
+
     dates = sorted(bodymass_log.keys())
     if not dates:
         return 0
-        
-    applicable_date = dates[0]
-    for d in dates:
+
+    applicable_date = None
+    for d in reversed(dates):
         if d <= target_date_str:
-            applicable_date = d
-        else:
-            break
-            
+            bm_data = bodymass_log[d]
+            bm = bm_data if isinstance(bm_data, (int, float)) else (bm_data.get("mass") or bm_data.get("weight"))
+            if bm is not None and bm > 0:
+                applicable_date = d
+                break
+
+    if not applicable_date:
+        for d in dates:
+            bm_data = bodymass_log[d]
+            bm = bm_data if isinstance(bm_data, (int, float)) else (bm_data.get("mass") or bm_data.get("weight"))
+            if bm is not None and bm > 0:
+                applicable_date = d
+                break
+
+    if not applicable_date:
+        return 0
+
     bm_data = bodymass_log[applicable_date]
-    current_bm = bm_data if isinstance(bm_data, (int, float)) else bm_data.get("mass", 0)
-    
+    current_bm = (
+        bm_data if isinstance(bm_data, (int, float)) else bm_data.get("mass")
+    )
+    if current_bm is None:
+        current_bm = bm_data.get("weight", 0) if isinstance(bm_data, dict) else 0
+
     if not current_bm:
         return 0
-        
-    rounded_bm = int(round(current_bm / 5.0) * 5.0)
+
+    rounded_bm = int(math.ceil(round(current_bm, 2) / 5.0) * 5)
     rounded_bm = max(50, min(rounded_bm, 140))
-    
-    if exercise_id not in EXERCISE_STANDARDS:
+
+    target_norm = exercise_id.lower().strip().replace(" ", "-")
+    found_slug = None
+
+    if target_norm in EXERCISE_STANDARDS:
+        found_slug = target_norm
+    else:
+        for slug, info in EXERCISE_STANDARDS.items():
+            if info.get("name", "").lower().strip().replace(" ", "-") == target_norm:
+                found_slug = slug
+                break
+
+    if not found_slug:
         return 0
-        
-    table = EXERCISE_STANDARDS[exercise_id]
-    available_bms = sorted(table.keys())
+
+    gender_table = EXERCISE_STANDARDS[found_slug].get(sex.lower())
+    if not gender_table:
+        return 0
+
+    available_bms = sorted(gender_table.keys())
     if not available_bms:
         return 0
-        
-    clipped_bm = max(available_bms[0], min(rounded_bm, available_bms[-1]))
-    return table[clipped_bm].get(level, 0)
 
-# Consolidate exercise standards database
+    clipped_bm = max(available_bms[0], min(rounded_bm, available_bms[-1]))
+    return gender_table[clipped_bm].get(level, 0)
+
+
+def get_tiered_standards(
+    exercise_id: str,
+    sex: str,
+    body_mass: Optional[float] = None,
+) -> Optional[Dict[int, Dict[str, int]]]:
+    """
+    Return dictionary of strength standards across bodyweight tiers for an exercise and sex.
+
+    :param exercise_id: Canonical exercise slug or display name.
+    :param sex: Biological sex ("male" or "female").
+    :param body_mass: Optional body mass in kg to return 3 adjacent tiers around user weight class.
+    :return: Dictionary mapping bodyweight tiers (kg) to tier level target weights, or None.
+    """
+    if not exercise_id:
+        return None
+
+    target_norm = exercise_id.lower().strip().replace(" ", "-")
+    found_slug = None
+
+    if target_norm in EXERCISE_STANDARDS:
+        found_slug = target_norm
+    else:
+        for slug, info in EXERCISE_STANDARDS.items():
+            if info.get("name", "").lower().strip().replace(" ", "-") == target_norm:
+                found_slug = slug
+                break
+
+    if not found_slug:
+        return None
+
+    gender_table = EXERCISE_STANDARDS[found_slug].get(sex.lower())
+    if not gender_table:
+        return None
+
+    available_bms = sorted(gender_table.keys())
+    if not available_bms:
+        return None
+
+    if body_mass is None or body_mass <= 0:
+        return gender_table
+
+    rounded_bm = int(math.ceil(round(body_mass, 2) / 5.0) * 5)
+
+    results = {}
+    for offset in [-5, 0, 5]:
+        target_bm = rounded_bm + offset
+        clipped_bm = max(available_bms[0], min(target_bm, available_bms[-1]))
+        results[target_bm] = gender_table[clipped_bm]
+
+    return results
+
+
 EXERCISE_STANDARDS = {
 '''
 
     content = header
     for ex_id, std_data in sorted(current_standards.items()):
         content += f'    "{ex_id}": {{\n'
-        for bm, levels in sorted(std_data.items()):
-            content += f"        {bm}: {levels},\n"
+        if isinstance(std_data, dict) and ("male" in std_data or "female" in std_data or "name" in std_data):
+            name_val = std_data.get("name", ex_id.replace("-", " ").title())
+            content += f'        "name": "{name_val}",\n'
+            for sex_key in ["male", "female"]:
+                tbl = std_data.get(sex_key, {})
+                content += f'        "{sex_key}": {{\n'
+                if tbl:
+                    for bm, levels in sorted(tbl.items()):
+                        content += f"            {bm}: {levels},\n"
+                content += "        },\n"
+        else:
+            for bm, levels in sorted(std_data.items()):
+                content += f"        {bm}: {levels},\n"
         content += "    },\n"
     content += "}\n"
 
@@ -111,8 +248,14 @@ EXERCISE_STANDARDS = {
 
 
 class StandardsParserApp(tk.Tk):
+    """Tkinter graphical tool for parsing and updating exercise strength standards."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """
+        Initialize the standards parser GUI window and input controls.
+
+        :return: None
+        """
         super().__init__()
 
         self.title("Iron Log - Standards Parser Tool")
@@ -167,8 +310,12 @@ class StandardsParserApp(tk.Tk):
         )
         self.btn_save.pack(side="right", padx=10, pady=10)
 
-    def load_exercise_registry(self):
-        """Attempts to load EXERCISE_REGISTRY from sessions.py using config."""
+    def load_exercise_registry(self) -> List[Any]:
+        """
+        Load registered exercise models from the active sessions module.
+
+        :return: List of exercise objects or empty list on failure.
+        """
         if not os.path.exists(CONFIG_FILE):
             return []
 
@@ -190,15 +337,25 @@ class StandardsParserApp(tk.Tk):
             import importlib
             import sessions
             importlib.reload(sessions)
-            return sessions.EXERCISE_REGISTRY
+            return getattr(sessions, "EXERCISE_REGISTRY", [])
         except Exception as e:
             print(f"Error loading registry: {e}")
             return []
 
-    def clear_input(self):
+    def clear_input(self) -> None:
+        """
+        Clear text from the raw table input widget.
+
+        :return: None
+        """
         self.txt_input.delete("1.0", "end")
 
-    def process(self):
+    def process(self) -> None:
+        """
+        Parse raw table text from input widget and persist entries into standards.py.
+
+        :return: None
+        """
         raw_text = self.txt_input.get("1.0", "end").strip()
         if not raw_text:
             messagebox.showerror("Error", "Please paste some data first.")

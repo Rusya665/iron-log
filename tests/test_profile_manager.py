@@ -1,9 +1,9 @@
-import os
-import sys
-import unittest
-import tempfile
-import shutil
 import json
+import os
+import shutil
+import sys
+import tempfile
+import unittest
 
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if PROJECT_ROOT not in sys.path:
@@ -13,15 +13,32 @@ from core.profile_manager import Profile, ProfileManager
 
 
 class TestProfileManager(unittest.TestCase):
-    def setUp(self):
+    """Unit test suite for athlete profile management and persistence."""
+
+    def setUp(self) -> None:
+        """
+        Create temporary directory and mock file paths for profiles.
+
+        :return: None
+        """
         self.temp_dir = tempfile.mkdtemp()
         self.profiles_path = os.path.join(self.temp_dir, "profiles.json")
         self.legacy_path = os.path.join(self.temp_dir, "config.json")
 
-    def tearDown(self):
+    def tearDown(self) -> None:
+        """
+        Remove temporary test directory.
+
+        :return: None
+        """
         shutil.rmtree(self.temp_dir)
 
-    def test_profile_to_dict(self):
+    def test_profile_to_dict(self) -> None:
+        """
+        Verify Profile dataclass serializes cleanly into dictionary representation.
+
+        :return: None
+        """
         p = Profile(
             name="Alice",
             sessions_dir="/path/to/sessions",
@@ -39,8 +56,14 @@ class TestProfileManager(unittest.TestCase):
         self.assertEqual(data["mass"], 65.0)
         self.assertFalse(data["show_standards"])
 
-    def test_profile_manager_persistence(self):
+    def test_profile_manager_persistence(self) -> None:
+        """
+        Verify CRUD lifecycle and disk persistence across ProfileManager instances.
+
+        :return: None
+        """
         import core.profile_manager
+
         orig_file = core.profile_manager.PROFILES_FILE
         orig_legacy = core.profile_manager.LEGACY_CONFIG
         core.profile_manager.PROFILES_FILE = self.profiles_path
@@ -66,7 +89,9 @@ class TestProfileManager(unittest.TestCase):
             self.assertEqual(active.name, "User2")
 
             # Update profile
-            p2_updated = Profile(name="User2-Edited", sessions_dir="/s2_new", output_dir="/o2_new")
+            p2_updated = Profile(
+                name="User2-Edited", sessions_dir="/s2_new", output_dir="/o2_new"
+            )
             pm2.update_profile(1, p2_updated)
             self.assertEqual(pm2.get_active_profile().name, "User2-Edited")
 
@@ -81,3 +106,4 @@ class TestProfileManager(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
