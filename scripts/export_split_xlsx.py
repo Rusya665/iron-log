@@ -28,6 +28,7 @@ if PROJECT_ROOT not in sys.path:
 from core.models import Log
 from core.plan_generator import calculate_gym_stats
 from core.standards import EXERCISE_STANDARDS
+from core.profile_manager import PROFILES_FILE
 
 
 def _get_default_paths() -> Tuple[str, str]:
@@ -35,7 +36,7 @@ def _get_default_paths() -> Tuple[str, str]:
     sessions_file = os.path.join(PROJECT_ROOT, "sessions.py")
     out_file = os.path.join(PROJECT_ROOT, "dist", "Latest_Split_Tracker.xlsx")
 
-    profiles_path = os.path.join(PROJECT_ROOT, "profiles.json")
+    profiles_path = PROFILES_FILE if os.path.exists(PROFILES_FILE) else os.path.join(PROJECT_ROOT, "profiles.json")
     if os.path.exists(profiles_path):
         try:
             with open(profiles_path, "r", encoding="utf-8") as f:

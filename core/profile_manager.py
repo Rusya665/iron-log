@@ -3,18 +3,21 @@ import os
 import sys
 from typing import List, Optional
 
-# Mirror the same frozen-aware path logic as config.py so that profiles.json
-# is written to %APPDATA%\IronLog\ when running as a PyInstaller exe.
-if getattr(sys, "frozen", False):
-    _app_data_dir = os.path.join(
-        os.environ.get("APPDATA", os.path.expanduser("~")), "IronLog"
-    )
-else:
-    _app_data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-os.makedirs(_app_data_dir, exist_ok=True)
+def get_app_data_dir() -> str:
+    """Returns the persistent user application data directory (%APPDATA%\\IronLog or ~/.ironlog)."""
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.expanduser("~")
+        app_dir = os.path.join(base, "IronLog")
+    else:
+        app_dir = os.path.join(os.path.expanduser("~"), ".ironlog")
+    os.makedirs(app_dir, exist_ok=True)
+    return app_dir
 
+
+_app_data_dir = get_app_data_dir()
 PROFILES_FILE = os.path.join(_app_data_dir, "profiles.json")
 LEGACY_CONFIG = os.path.join(_app_data_dir, "config.json")
+ROOT_PROFILES_FILE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "profiles.json"))
 
 
 class Profile:
@@ -63,6 +66,14 @@ class ProfileManager:
         self.load_profiles()
 
     def load_profiles(self):
+        # Auto-migrate from root profiles.json if AppData profiles.json does not exist yet
+        if not os.path.exists(PROFILES_FILE) and os.path.exists(ROOT_PROFILES_FILE):
+            try:
+                import shutil
+                shutil.copy2(ROOT_PROFILES_FILE, PROFILES_FILE)
+            except Exception as e:
+                print(f"Migration from root profiles.json failed: {e}")
+
         if not os.path.exists(PROFILES_FILE):
             # Attempt to migrate from legacy config
             if os.path.exists(LEGACY_CONFIG):

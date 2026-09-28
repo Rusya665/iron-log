@@ -59,7 +59,8 @@ def get_exercise_standard(
     if not current_bm:
         return 0
 
-    rounded_bm = int(current_bm / 5.0) * 5
+    import math
+    rounded_bm = int(math.ceil(round(current_bm, 2) / 5.0) * 5)
     rounded_bm = max(50, min(rounded_bm, 140))
 
     # Strict lookup
@@ -121,11 +122,11 @@ def get_tiered_standards(exercise_id: str, sex: str, body_mass: float = None):
     if not available_bms:
         return None
 
-    if body_mass is None:
+    if body_mass is None or body_mass <= 0:
         return gender_table
 
-    # Anchor to the lower 5kg bracket (as requested)
-    rounded_bm = int(body_mass / 5.0) * 5
+    import math
+    rounded_bm = int(math.ceil(round(body_mass, 2) / 5.0) * 5)
 
     results = {}
     for offset in [-5, 0, 5]:

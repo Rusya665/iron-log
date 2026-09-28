@@ -1079,7 +1079,7 @@ HTML_TEMPLATE = f"""
             const y = e.clientY + 14;
             
             tooltipTimer = setTimeout(async () => {{
-                const tableData = await pywebview.api.get_exercise_standards_table(exId);
+                const tableData = await pywebview.api.get_exercise_standards_table(exId, userMass);
                 const tip = document.getElementById("standardsTooltip");
                 
                 if (!tableData || !tableData.standards || Object.keys(tableData.standards).length === 0) {{
@@ -1089,7 +1089,7 @@ HTML_TEMPLATE = f"""
                     const targetBm = tableData.target_bm;
                     
                     for (const [bm, levels] of Object.entries(tableData.standards)) {{
-                        const isUserBm = parseInt(bm) === targetBm;
+                        const isUserBm = Boolean(targetBm && parseInt(bm) === targetBm);
                         let cells = `<td>${{bm}}kg</td>`;
                         for (const lvl of ["Beginner", "Novice", "Intermediate", "Advanced", "Elite"]) {{
                             const val = levels[lvl] || "-";

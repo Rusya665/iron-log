@@ -44,5 +44,26 @@ class TestStandards(unittest.TestCase):
         self.assertGreater(tiers[80]["Elite"], tiers[80]["Beginner"])
 
 
+    def test_weight_class_ceiling_over_85(self):
+        # When body mass is 86.45 (>85), it should select the 90kg tier
+        bodymass_log = {"2026-09-01": {"mass": 86.45}}
+        std_90 = get_exercise_standard("squat", "2026-09-01", bodymass_log, level="Intermediate", sex="male")
+        # Standard for 90kg male intermediate squat is 146
+        self.assertEqual(std_90, 146)
+
+    def test_bridge_calculate_target_bm_no_hardcoded_fallback(self):
+        from ui.bridge import WebViewBridgeApi
+        # 86.45 kg -> 90 kg
+        self.assertEqual(WebViewBridgeApi._calculate_target_bm(86.45), 90)
+        # 85.0 kg -> 85 kg
+        self.assertEqual(WebViewBridgeApi._calculate_target_bm(85.0), 85)
+        # 85.05 kg -> 90 kg
+        self.assertEqual(WebViewBridgeApi._calculate_target_bm(85.05), 90)
+        # None or 0 -> None (NO 80kg hardcoded fallback!)
+        self.assertIsNone(WebViewBridgeApi._calculate_target_bm(None))
+        self.assertIsNone(WebViewBridgeApi._calculate_target_bm(0))
+        self.assertIsNone(WebViewBridgeApi._calculate_target_bm(-5.0))
+
+
 if __name__ == "__main__":
     unittest.main()

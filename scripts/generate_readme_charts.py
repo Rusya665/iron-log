@@ -153,11 +153,12 @@ def initialize_data_source(use_real):
     
     if use_real:
         print("Using real data from user's sessions.py...")
-        PROFILES_FILE = os.path.join(PROJECT_ROOT, "profiles.json")
+        from core.profile_manager import PROFILES_FILE as APP_PROFILES_FILE
+        target_profiles = APP_PROFILES_FILE if os.path.exists(APP_PROFILES_FILE) else os.path.join(PROJECT_ROOT, "profiles.json")
         sessions_dir = PROJECT_ROOT
-        if os.path.exists(PROFILES_FILE):
+        if os.path.exists(target_profiles):
             try:
-                with open(PROFILES_FILE, "r", encoding="utf-8") as f:
+                with open(target_profiles, "r", encoding="utf-8") as f:
                     profiles_data = json.load(f)
                     idx = profiles_data.get("active_profile_index", 0)
                     profiles = profiles_data.get("profiles", [])

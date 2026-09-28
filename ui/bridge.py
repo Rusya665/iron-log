@@ -304,12 +304,51 @@ class WebViewBridgeApi:
             "sessions": recent_sessions,
         }
 
-    def get_exercise_standards_table(self, exercise_id: str) -> Dict[str, Any]:
+    def _resolve_user_mass(self, explicit_mass: Optional[float] = None) -> Optional[float]:
+        """Resolves user mass dynamically without any hardcoded fallbacks.
+        Order of precedence:
+        1. Explicit mass passed (e.g. from session hover, if > 0)
+        2. Latest logged mass in sessions.py BODYMASS_LOG
+        3. Profile configured mass (if > 0)
+        Returns None if no mass is recorded anywhere.
+        """
+        if explicit_mass is not None and float(explicit_mass) > 0:
+            return float(explicit_mass)
+
+        p = self.manager.get_active_profile()
+        if p:
+            sess, _ = self._load_sessions(p)
+            if sess:
+                bm_log = getattr(sess, "BODYMASS_LOG", {})
+                if bm_log:
+                    for d in sorted(bm_log.keys(), reverse=True):
+                        bm_data = bm_log[d]
+                        m = bm_data if isinstance(bm_data, (int, float)) else (bm_data.get("mass") or bm_data.get("weight"))
+                        if m and float(m) > 0:
+                            return float(m)
+            prof_mass = getattr(p, "mass", 0.0)
+            if prof_mass and float(prof_mass) > 0:
+                return float(prof_mass)
+
+        return None
+
+    @staticmethod
+    def _calculate_target_bm(mass: Optional[float]) -> Optional[int]:
+        """Calculates target standard tier without hardcoded fallbacks.
+        Uses weight class ceiling (5kg tiers: e.g. >85kg to 90kg -> 90).
+        Returns None if mass is not recorded.
+        """
+        if mass is None or mass <= 0:
+            return None
+        import math
+        return int(math.ceil(round(mass, 2) / 5.0) * 5)
+
+    def get_exercise_standards_table(self, exercise_id: str, mass: Optional[float] = None) -> Dict[str, Any]:
         p = self.manager.get_active_profile()
         sex = getattr(p, "sex", "male") if p else "male"
-        mass = getattr(p, "mass", 80.0) if p else 80.0
+        resolved_mass = self._resolve_user_mass(mass)
         standards = get_tiered_standards(exercise_id, sex, None)
-        target_bm = int(mass / 5.0) * 5 if mass else 80
+        target_bm = self._calculate_target_bm(resolved_mass)
         name = EXERCISE_STANDARDS.get(exercise_id, {}).get("name", exercise_id)
         return {
             "exercise_id": exercise_id,
@@ -638,19 +677,19 @@ class WebViewBridgeApi:
     def search_standards(self, query: str) -> List[Dict[str, Any]]:
         p = self.manager.get_active_profile()
         sex = getattr(p, "sex", "male") if p else "male"
-        mass = getattr(p, "mass", 80.0) if p else 80.0
+        resolved_mass = self._resolve_user_mass()
+        target_bm = self._calculate_target_bm(resolved_mass)
 
         q = (query or "").strip().lower()
         results = []
-        target_bm = int(mass / 5.0) * 5
 
         for slug, info in EXERCISE_STANDARDS.items():
             name = info.get("name", slug)
             if q and (q not in name.lower() and q not in slug.lower()):
                 continue
 
-            standards = get_tiered_standards(slug, sex, mass)
-            levels = standards.get(target_bm, {}) if standards else {}
+            standards = get_tiered_standards(slug, sex, resolved_mass)
+            levels = standards.get(target_bm, {}) if (standards and target_bm) else {}
 
             results.append({
                 "slug": slug,
