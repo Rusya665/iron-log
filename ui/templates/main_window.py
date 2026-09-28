@@ -1193,7 +1193,7 @@ HTML_TEMPLATE = f"""
             document.getElementById("updateErrorBox").style.display = "none";
             document.getElementById("updateProgressSection").style.display = "flex";
             document.getElementById("updateModalTitle").innerText = "⚡ Updating Iron Log...";
-            document.getElementById("updateModalSub").innerText = "Downloading installer and preparing silent upgrade...";
+            document.getElementById("updateModalSub").innerText = "Downloading installer...";
             document.getElementById("updateProgressStatus").innerText = "Starting download...";
 
             const res = await pywebview.api.start_update(pendingUpdateUrl);
@@ -1222,10 +1222,10 @@ HTML_TEMPLATE = f"""
                         clearInterval(updatePollingTimer);
                         document.getElementById("updateProgressBar").style.width = "100%";
                         document.getElementById("updateProgressPercent").innerText = "100%";
-                        document.getElementById("updateProgressStatus").innerText = "Restarting Iron Log...";
-                        document.getElementById("updateProgressDetails").innerText = "Launching silent installer...";
-                        document.getElementById("updateModalTitle").innerText = "✅ Update Ready!";
-                        document.getElementById("updateModalSub").innerText = "Iron Log will now restart with the latest version.";
+                        document.getElementById("updateProgressStatus").innerText = "Download complete!";
+                        document.getElementById("updateProgressDetails").innerText = "Opening Windows installer...";
+                        document.getElementById("updateModalTitle").innerText = "✅ Ready to Install!";
+                        document.getElementById("updateModalSub").innerText = "The setup window will now open to complete the installation.";
                     }} else if (status.state === "error") {{
                         clearInterval(updatePollingTimer);
                         document.getElementById("updateProgressSection").style.display = "none";

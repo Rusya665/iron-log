@@ -86,7 +86,7 @@ def download_and_install_update(
     progress_callback: Optional[Callable[[int, int, float], None]] = None,
 ) -> Tuple[bool, Optional[str]]:
     """
-    Download the installer and run a detached batch process to execute silent installation and relaunch.
+    Download update installer and launch interactive setup window with progress and completion controls.
 
     :param download_url: Direct download URL of the setup executable asset.
     :param progress_callback: Optional callback accepting (downloaded_bytes, total_bytes, percentage).
@@ -115,26 +115,16 @@ def download_and_install_update(
         if not os.path.exists(exe_path) or os.path.getsize(exe_path) == 0:
             return False, "Downloaded update installer was empty or invalid."
 
-        # Target executable path to restart after installation
-        target_installed_exe = os.path.join(
-            os.environ.get("LOCALAPPDATA", ""), "Programs", "IronLog", "IronLog.exe"
-        )
-
-        # Batch script: wait for caller to exit, install silently with /SP-, restart app, clean up
+        # Batch script: wait for IronLog to exit, launch interactive installer with progress & finish controls, clean up
         bat_content = f"""@echo off
 ping 127.0.0.1 -n 3 > nul
-"{exe_path}" /SP- /VERYSILENT /SUPPRESSMSGBOXES /FORCECLOSEAPPLICATIONS
-ping 127.0.0.1 -n 2 > nul
-if exist "{target_installed_exe}" (
-    start "" "{target_installed_exe}"
-) else if exist "%ProgramFiles%\\IronLog\\IronLog.exe" (
-    start "" "%ProgramFiles%\\IronLog\\IronLog.exe"
-)
+start "" /wait "{exe_path}"
 del /f /q "{exe_path}"
 del /f /q "%~f0"
 """
         with open(bat_path, "w", encoding="utf-8") as f:
             f.write(bat_content)
+
 
         # Strip PyInstaller env variables so spawned process starts fresh
         env = os.environ.copy()
