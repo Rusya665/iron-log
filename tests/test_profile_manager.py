@@ -66,8 +66,10 @@ class TestProfileManager(unittest.TestCase):
 
         orig_file = core.profile_manager.PROFILES_FILE
         orig_legacy = core.profile_manager.LEGACY_CONFIG
+        orig_root = core.profile_manager.ROOT_PROFILES_FILE
         core.profile_manager.PROFILES_FILE = self.profiles_path
         core.profile_manager.LEGACY_CONFIG = self.legacy_path
+        core.profile_manager.ROOT_PROFILES_FILE = os.path.join(self.temp_dir, "nonexistent_root_profiles.json")
 
         try:
             pm = ProfileManager()
@@ -102,6 +104,7 @@ class TestProfileManager(unittest.TestCase):
         finally:
             core.profile_manager.PROFILES_FILE = orig_file
             core.profile_manager.LEGACY_CONFIG = orig_legacy
+            core.profile_manager.ROOT_PROFILES_FILE = orig_root
 
 
 if __name__ == "__main__":
