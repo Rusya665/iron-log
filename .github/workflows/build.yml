@@ -77,11 +77,17 @@ jobs:
         path: dist/IronLog.exe
         if-no-files-found: warn
 
-    - name: Extract Commit Message for Release Notes
+    - name: Extract Release Notes from Tag or Commit
       if: github.ref == 'refs/heads/main'
       shell: pwsh
       run: |
-        git log -1 --pretty=%B | Out-File -FilePath RELEASE_NOTES.md -Encoding utf8
+        git fetch --tags --force
+        $tagMsg = git tag -l -n99 "v$env:APP_VERSION"
+        if ($tagMsg) {
+            ($tagMsg -replace "^v$([regex]::Escape($env:APP_VERSION))\s+", "") | Out-File -FilePath RELEASE_NOTES.md -Encoding utf8
+        } else {
+            git log -1 --pretty=%B | Out-File -FilePath RELEASE_NOTES.md -Encoding utf8
+        }
 
     - name: Create Release and Upload Asset
       if: github.ref == 'refs/heads/main'

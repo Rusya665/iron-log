@@ -129,10 +129,7 @@ class TrainingLogProcessor:
         self.metrics = METRICS_CONFIG
 
         if not self.bodymass_log:
-            import sys
-
-            print("CRITICAL ERROR: 'BODYMASS_LOG' is empty.")
-            sys.exit(1)
+            raise ValueError("CRITICAL ERROR: 'BODYMASS_LOG' is empty.")
 
         self.wb = xlsxwriter.Workbook(self.output_path)
         self.ws_charts = self.wb.add_worksheet("Progress_Charts")
@@ -169,12 +166,31 @@ class TrainingLogProcessor:
 
         self._init_styles()
 
+    def close(self) -> None:
+        """Close the xlsxwriter workbook file handle if open."""
+        if getattr(self, "wb", None):
+            try:
+                self.wb.close()
+            except Exception:
+                pass
+            finally:
+                self.wb = None
+
+    def __enter__(self) -> "TrainingLogProcessor":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        self.close()
+
     def _init_styles(self) -> None:
         """
         Initialize cell formatting styles, fonts, borders, and color fills for workbook generation.
 
         :return: None.
         """
+        self.style_percent = self.wb.add_format(
+            {"num_format": "0%", "border": 1, "align": "center"}
+        )
         self.style_header_main = self.wb.add_format(
             {
                 "bold": True,
@@ -403,7 +419,6 @@ class TrainingLogProcessor:
             3: "Bg (Adv)",
             4: "Bg (Eli)",
         }
-        max_level_so_far = {ex.id: -1 for ex in self.exercises}
         sex = self.user_profile.get("sex", "male")
 
         # Pre-compute each exercise's final achieved milestone level across ALL dates.
@@ -505,9 +520,7 @@ class TrainingLogProcessor:
                     self.row_cursor,
                     3,
                     daily_intensity,
-                    self.wb.add_format(
-                        {"num_format": "0%", "border": 1, "align": "center"}
-                    ),
+                    self.style_percent,
                 )
 
             for ex in self.exercises:
@@ -518,49 +531,7 @@ class TrainingLogProcessor:
                 )
                 raw_input = day_data.get(ex.id) if has_data else None
 
-                if has_data:
-                    is_bodyweight = (
-                        max(raw_input.mass) == 0 if raw_input.mass else False
-                    )
-                    cap = (
-                        max(raw_input.reps)
-                        if is_bodyweight
-                        else calc_brzycki(raw_input)
-                    )
-
-                    std_beg = get_exercise_standard(
-                        ex.id, date_str, self.bodymass_log, "Beginner", sex=sex
-                    )
-                    std_nov = get_exercise_standard(
-                        ex.id, date_str, self.bodymass_log, "Novice", sex=sex
-                    )
-                    std_int = get_exercise_standard(
-                        ex.id, date_str, self.bodymass_log, "Intermediate", sex=sex
-                    )
-                    std_adv = get_exercise_standard(
-                        ex.id, date_str, self.bodymass_log, "Advanced", sex=sex
-                    )
-                    std_eli = get_exercise_standard(
-                        ex.id, date_str, self.bodymass_log, "Elite", sex=sex
-                    )
-
-                    today_level = -1
-                    if std_eli > 0 and cap >= std_eli:
-                        today_level = 4
-                    elif std_adv > 0 and cap >= std_adv:
-                        today_level = 3
-                    elif std_int > 0 and cap >= std_int:
-                        today_level = 2
-                    elif std_nov > 0 and cap >= std_nov:
-                        today_level = 1
-                    elif std_beg > 0 and cap >= std_beg:
-                        today_level = 0
-
-                    if today_level > max_level_so_far[ex.id]:
-                        max_level_so_far[ex.id] = today_level
-
-                # Use the pre-computed final level for the background so it fills the whole chart,
-                # but still update max_level_so_far for future milestone transition tracking.
+                # Use the pre-computed final level for the background so it fills the whole chart
                 active_bg_level = LEVEL_MAP[final_level[ex.id]]
 
                 for m in self.metrics:
@@ -1021,10 +992,7 @@ class TrainingLogProcessor:
             }
         )
         self.ws_charts.insert_chart(f"{right_col_letter}{target_row + 1}", int_chart)
-
-        max_cursor = max(cursor_left, cursor_right)
-        max_cursor = max(max_cursor, target_row + self._pixels_to_rows(h_summary) + 1)
-        chart_pos_y = max_cursor + 5
+        cursor_right = target_row + self._pixels_to_rows(h_summary) + 2
 
         # Training Day pattern chart (only if Day data exists)
         if getattr(self, "td_total_rows", 0) > 0:
@@ -1061,6 +1029,8 @@ class TrainingLogProcessor:
             )
             cursor_right += self._pixels_to_rows(CHART_CONFIG["column"]["height"]) + 2
 
+        chart_pos_y = max(cursor_left, cursor_right) + 5
+
         for ex in self.exercises:
             # We must calculate Y-axis max early so we can strictly bind the primary axis.
             all_mass_vals = []
@@ -1090,7 +1060,7 @@ class TrainingLogProcessor:
                 # Also ensure the next target standard tier is visible in the chart
                 # Find the last bodymass date to get current standard values
                 sex = self.user_profile.get("sex", "male")
-                last_date = sorted(self.user_data.keys())[-1]
+                last_date = sorted(self.user_data.keys())[-1] if self.user_data else None
                 std_levels_ordered = [
                     "Beginner",
                     "Novice",
@@ -1098,14 +1068,15 @@ class TrainingLogProcessor:
                     "Advanced",
                     "Elite",
                 ]
-                for lvl_name in std_levels_ordered:
-                    std_val = get_exercise_standard(
-                        ex.id, last_date, self.bodymass_log, lvl_name, sex=sex
-                    )
-                    if std_val and std_val > max_mass:
-                        # Show the first tier above max performance with 10% margin
-                        y_max = max(y_max, int(std_val * 1.10))
-                        break
+                if last_date:
+                    for lvl_name in std_levels_ordered:
+                        std_val = get_exercise_standard(
+                            ex.id, last_date, self.bodymass_log, lvl_name, sex=sex
+                        )
+                        if std_val and std_val > max_mass:
+                            # Show the first tier above max performance with 10% margin
+                            y_max = max(y_max, int(std_val * 1.10))
+                            break
                 if y_max <= y_min:
                     y_max = y_min + 10
             else:
@@ -1123,40 +1094,11 @@ class TrainingLogProcessor:
             series_2_name = "Max Reps" if is_bodyweight else "Est 1RM"
             y_axis_name = "Max Reps" if is_bodyweight else "Mass (kg)"
 
-            # 1. CREATE AREA BACKGROUND CHART FIRST (Becomes Primary Chart)
-            bg_chart = self.wb.add_chart({"type": "area", "subtype": "stacked"})
-            bg_chart.set_x_axis({"date_axis": True, "num_font": {"rotation": -45}})
-            bg_chart.show_blanks_as("span")
-
             show_milestones = self.user_profile.get("show_milestones", True)
-            if show_milestones:
-                for bg_key, bg_color, trans in self.bg_levels:
-                    if bg_key in self.col_map[ex.id]:
-                        col_bg = self.col_map[ex.id][bg_key]
-                        bg_chart.add_series(
-                            {
-                                "name": bg_key,
-                                "categories": [
-                                    "Data_Log",
-                                    2,
-                                    0,
-                                    self.row_cursor - 1,
-                                    0,
-                                ],
-                                "values": [
-                                    "Data_Log",
-                                    2,
-                                    col_bg,
-                                    self.row_cursor - 1,
-                                    col_bg,
-                                ],
-                                "fill": {"color": bg_color, "transparency": trans},
-                                "line": {"none": True},
-                            }
-                        )
 
-            # 2. CREATE LINE CHART SECOND (Becomes Secondary Combined Chart)
+            # 1. CREATE LINE CHART (Always has performance data)
             mass_chart = self.wb.add_chart({"type": "line"})
+            mass_chart.set_x_axis({"date_axis": True, "num_font": {"rotation": -45}})
             mass_chart.show_blanks_as(
                 "span"
             )  # Connect sparse standard lines across blank dates
@@ -1240,10 +1182,43 @@ class TrainingLogProcessor:
                             }
                         )
 
-            # 3. COMBINE AND CLAMP AXIS
-            bg_chart.combine(mass_chart)
+            # 2. OPTIONALLY CREATE AREA BACKGROUND CHART AND COMBINE
+            if show_milestones:
+                bg_chart = self.wb.add_chart({"type": "area", "subtype": "stacked"})
+                bg_chart.set_x_axis({"date_axis": True, "num_font": {"rotation": -45}})
+                bg_chart.show_blanks_as("span")
+                for bg_key, bg_color, trans in self.bg_levels:
+                    if bg_key in self.col_map[ex.id]:
+                        col_bg = self.col_map[ex.id][bg_key]
+                        bg_chart.add_series(
+                            {
+                                "name": bg_key,
+                                "categories": [
+                                    "Data_Log",
+                                    2,
+                                    0,
+                                    self.row_cursor - 1,
+                                    0,
+                                ],
+                                "values": [
+                                    "Data_Log",
+                                    2,
+                                    col_bg,
+                                    self.row_cursor - 1,
+                                    col_bg,
+                                ],
+                                "fill": {"color": bg_color, "transparency": trans},
+                                "line": {"none": True},
+                            }
+                        )
+                bg_chart.combine(mass_chart)
+                primary_chart = bg_chart
+                primary_chart.set_legend({"position": "bottom", "delete_series": [0, 1, 2, 3, 4, 5]})
+            else:
+                primary_chart = mass_chart
+                primary_chart.set_legend({"position": "bottom"})
 
-            bg_chart.set_y_axis(
+            primary_chart.set_y_axis(
                 {
                     "name": y_axis_name,
                     "major_gridlines": {"visible": True},
@@ -1251,17 +1226,12 @@ class TrainingLogProcessor:
                     "max": y_max,
                 }
             )
-            bg_chart.set_title(
+            primary_chart.set_title(
                 {"name": f"{ex.display_name} - Progress ({y_axis_name})"}
             )
-            bg_chart.set_size({"width": w_indiv, "height": h_indiv})
+            primary_chart.set_size({"width": w_indiv, "height": h_indiv})
 
-            # Hide the 6 background area series from the legend
-            bg_chart.set_legend(
-                {"position": "bottom", "delete_series": [0, 1, 2, 3, 4, 5]}
-            )
-
-            self.ws_charts.insert_chart(f"{left_col_letter}{chart_pos_y}", bg_chart)
+            self.ws_charts.insert_chart(f"{left_col_letter}{chart_pos_y}", primary_chart)
 
             col_reps = self.col_map[ex.id]["Avg Reps"]
             col_reps_err = self.col_map[ex.id]["Stdev Reps"]
@@ -1398,8 +1368,12 @@ class TrainingLogProcessor:
 
         :return: None.
         """
+        if not getattr(self, "wb", None):
+            return
         try:
             self.wb.close()
             print(f"Log generated: {self.output_path}")
         except Exception as e:
             print(f"Error saving: {e}")
+        finally:
+            self.wb = None

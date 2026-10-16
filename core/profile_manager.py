@@ -48,8 +48,11 @@ class Profile:
         show_milestones: bool = True,
     ) -> None:
         self.name: str = name
-        self.sessions_dir: str = sessions_dir
-        self.output_dir: str = output_dir
+        clean_dir = (sessions_dir or "").strip(" '\"")
+        if clean_dir.lower().endswith(".py") or os.path.isfile(clean_dir):
+            clean_dir = os.path.dirname(clean_dir)
+        self.sessions_dir: str = clean_dir
+        self.output_dir: str = (output_dir or "").strip(" '\"")
         self.age: int = age
         self.sex: str = sex
         self.mass: float = mass
@@ -132,7 +135,7 @@ class ProfileManager:
             self.profiles = []
             self.active_profile_index = -1
 
-        if not self.profiles:
+        if not self.profiles or not self.remember_last_user:
             self.active_profile_index = -1
         elif self.active_profile_index < 0 or self.active_profile_index >= len(self.profiles):
             self.active_profile_index = 0

@@ -241,7 +241,12 @@ EXERCISE_STANDARDS = {
             for bm, levels in sorted(std_data.items()):
                 content += f"        {bm}: {levels},\n"
         content += "    },\n"
-    content += "}\n"
+    content += "}\n\n# --- Exercise Constants for Autocomplete ---\n"
+    for ex_id, std_data in sorted(current_standards.items()):
+        name_val = std_data.get("name", ex_id.replace("-", " ").title()) if isinstance(std_data, dict) else ex_id.replace("-", " ").title()
+        var_name = re.sub(r"[^A-Z0-9\s]", "", name_val.upper()).strip().replace(" ", "_")
+        if var_name:
+            content += f'{var_name} = "{ex_id}"\n'
 
     with open(STANDARDS_FILE, "w", encoding="utf-8") as f:
         f.write(content)
@@ -274,7 +279,7 @@ class StandardsParserApp(tk.Tk):
 
         self.registry = self.load_exercise_registry()
         exercise_names = (
-            [f"{ex.id} ({ex.name})" for ex in self.registry]
+            [f"{ex.id} ({ex.display_name})" for ex in self.registry]
             if self.registry
             else ["No Registry Found"]
         )
@@ -316,31 +321,51 @@ class StandardsParserApp(tk.Tk):
 
         :return: List of exercise objects or empty list on failure.
         """
-        if not os.path.exists(CONFIG_FILE):
+        sessions_dir = None
+        try:
+            from core.profile_manager import ProfileManager
+            pm = ProfileManager()
+            active_p = pm.get_active_profile()
+            if active_p and active_p.sessions_dir and os.path.exists(active_p.sessions_dir):
+                sessions_dir = active_p.sessions_dir
+        except Exception:
+            pass
+
+        if not sessions_dir and os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "r") as f:
+                    config = json.load(f)
+                candidate = config.get("sessions_dir")
+                if candidate and os.path.exists(candidate):
+                    sessions_dir = candidate
+            except Exception:
+                pass
+
+        if not sessions_dir:
             return []
 
-        with open(CONFIG_FILE, "r") as f:
-            config = json.load(f)
-
-        sessions_dir = config.get("sessions_dir")
-        if not sessions_dir or not os.path.exists(sessions_dir):
+        sessions_file = os.path.join(sessions_dir, "sessions.py")
+        if not os.path.exists(sessions_file):
             return []
-
-        if sessions_dir not in sys.path:
-            sys.path.insert(0, sessions_dir)
 
         root_dir = os.path.join(os.path.dirname(__file__), "..")
         if root_dir not in sys.path:
             sys.path.append(root_dir)
+        if sessions_dir not in sys.path:
+            sys.path.insert(0, sessions_dir)
 
         try:
-            import importlib
-            import sessions
-            importlib.reload(sessions)
-            return getattr(sessions, "EXERCISE_REGISTRY", [])
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("sessions", sessions_file)
+            if spec and spec.loader:
+                sess = importlib.util.module_from_spec(spec)
+                sys.modules["sessions"] = sess
+                spec.loader.exec_module(sess)
+                return getattr(sess, "EXERCISE_REGISTRY", [])
         except Exception as e:
             print(f"Error loading registry: {e}")
             return []
+        return []
 
     def clear_input(self) -> None:
         """

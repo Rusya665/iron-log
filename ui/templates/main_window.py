@@ -929,6 +929,16 @@ HTML_TEMPLATE = f"""
         let cachedStats = {{}};
         let activeMenu = null;
 
+        function escapeHtml(str) {{
+            if (str === null || str === undefined) return "";
+            return String(str)
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }}
+
         function toggleMenu(menuId, e) {{
             if (e) e.stopPropagation();
             const el = document.getElementById(menuId);
@@ -957,6 +967,12 @@ HTML_TEMPLATE = f"""
             try {{
                 await loadDashboard();
                 await updateMenuState();
+
+                // If no profiles exist, automatically open profile creation modal
+                const pData = await pywebview.api.get_profiles();
+                if (!pData.profiles || pData.profiles.length === 0) {{
+                    openProfileCreator();
+                }}
 
                 // Automatically check for updates on startup (after 1.2s so dashboard loads first)
                 setTimeout(() => {{
@@ -1020,7 +1036,39 @@ HTML_TEMPLATE = f"""
             document.getElementById("sidebarStatus").innerText = "● Loading...";
             const data = await pywebview.api.get_active_data();
             if (!data.success) {{
-                document.getElementById("sidebarStatus").innerText = "● " + data.error;
+                document.getElementById("sidebarStatus").innerText = "● " + (data.error || "Error");
+                document.getElementById("c1Val").innerText = "-- Days";
+                document.getElementById("c1Sub").innerText = "-- this year · -- this month";
+                document.getElementById("c2Val").innerText = "-- Wks";
+                document.getElementById("c2Sub").innerText = "--";
+                document.getElementById("c3Val").innerText = "--";
+                document.getElementById("c3Sub").innerText = "--";
+                const container = document.getElementById("sessionsGrid");
+                if (container) {{
+                    const isNoProf = (data.error === "No profile selected" || data.error === "No active profile");
+                    const errTitle = isNoProf ? "No Profile Selected" : "Failed to Load sessions.py";
+                    const editBtn = isNoProf ? "" : `
+                        <button class="btn-side-sec" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; font-weight: 600;" onclick="pywebview.api.edit_sessions()">
+                            <span>✏️</span> Open in Editor
+                        </button>
+                    `;
+                    container.innerHTML = `
+                        <div style="width: 100%; background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: var(--radius-lg); padding: 32px; text-align: center; box-sizing: border-box;">
+                            <div style="font-size: 36px; margin-bottom: 12px;">⚠️</div>
+                            <div style="font-size: 16px; font-weight: 700; color: #f87171; margin-bottom: 8px;">${{errTitle}}</div>
+                            <div style="font-size: 13px; color: #e2e8f0; font-family: 'JetBrains Mono', monospace; background: rgba(0,0,0,0.3); padding: 12px 16px; border-radius: 8px; margin: 12px auto 20px auto; max-width: 650px; text-align: left; word-break: break-all; white-space: pre-wrap;">${{escapeHtml(data.error)}}</div>
+                            <div style="display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;">
+                                ${{editBtn}}
+                                <button class="btn-side-primary2" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px; font-weight: 600;" onclick="openProfilePicker()">
+                                    <span>📁</span> Manage Profile / Select Folder
+                                </button>
+                                <button class="btn-refresh" style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 20px;" onclick="loadDashboard()">
+                                    <span>🔄</span> Retry
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }}
                 return;
             }}
             document.getElementById("sidebarProfName").innerText = data.profile_name;
@@ -1368,12 +1416,12 @@ HTML_TEMPLATE = f"""
                 card.className = "stat-card clickable";
                 card.style.borderColor = isAct ? "rgba(59, 130, 246, 0.6)" : "var(--border-glass)";
                 card.innerHTML = `
-                    <div style="font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 16px; color: ${{isAct ? '#60A5FA' : '#FFF'}};">${{p.name}}</div>
-                    <div style="font-size: 11px; color: var(--text-muted);">${{p.sessions_dir}}</div>
+                    <div style="font-family: 'Outfit', sans-serif; font-weight: 700; font-size: 16px; color: ${{isAct ? '#60A5FA' : '#FFF'}};">${{escapeHtml(p.name)}}</div>
+                    <div style="font-size: 11px; color: var(--text-muted);">${{escapeHtml(p.sessions_dir)}}</div>
                     <div style="display: flex; gap: 6px; margin-top: 10px;">
                         <button class="btn-tool" onclick="selectProf(${{idx}})">Select</button>
                         <button class="btn-tool" onclick="editProf(${{idx}})">Edit</button>
-                        <button class="btn-tool" style="color: #F87171;" onclick="deleteProf(${{idx}}, '${{p.name}}')">Delete</button>
+                        <button class="btn-tool" style="color: #F87171;" onclick="deleteProf(${{idx}})">Delete</button>
                     </div>
                 `;
                 list.appendChild(card);
@@ -1401,7 +1449,10 @@ HTML_TEMPLATE = f"""
             openModal("modalProfileCreator");
         }}
 
-        async function deleteProf(idx, name) {{
+        async function deleteProf(idx) {{
+            const data = await pywebview.api.get_profiles();
+            const prof = (data.profiles || [])[idx];
+            const name = prof ? prof.name : "profile";
             if (confirm(`Are you sure you want to delete profile '${{name}}'?`)) {{
                 await pywebview.api.delete_profile(idx);
                 await openProfilePicker();
@@ -1443,26 +1494,45 @@ HTML_TEMPLATE = f"""
             }}
         }}
 
+        function copyText(txt) {{
+            if (navigator.clipboard && navigator.clipboard.writeText) {{
+                navigator.clipboard.writeText(txt);
+            }} else if (window.pywebview && window.pywebview.api) {{
+                pywebview.api.copy_clipboard(txt);
+            }}
+        }}
+
         /* ── Standards & Split ───────────────────────────────────────────── */
         async function openStandardsModal() {{
-            await filterStandards("");
+            await doFilterStandards("");
             openModal("modalStandards");
         }}
-        
-        async function filterStandards(query) {{
+
+        let stdDebounceTimer = null;
+        function filterStandards(query) {{
+            clearTimeout(stdDebounceTimer);
+            stdDebounceTimer = setTimeout(() => {{
+                doFilterStandards(query);
+            }}, 200);
+        }}
+
+        async function doFilterStandards(query) {{
             const list = await pywebview.api.search_standards(query);
             const tbody = document.getElementById("stdTbody");
             tbody.innerHTML = "";
             (list || []).forEach(item => {{
                 const tr = document.createElement("tr");
+                const safeName = escapeHtml(item.name);
+                const safeSlug = escapeHtml(item.slug);
+                const pyCode = safeSlug.replace(/-/g, '_') + ' = \\"' + safeSlug + '\\"';
                 tr.innerHTML = `
-                    <td style="font-weight: 600;">${{item.name}}</td>
-                    <td><span class="badge-slug">${{item.slug}}</span></td>
-                    <td>${{item.beg}}</td><td>${{item.nov}}</td><td>${{item.int}}</td><td>${{item.adv}}</td><td>${{item.eli}}</td>
+                    <td style="font-weight: 600;">${{safeName}}</td>
+                    <td><span class="badge-slug">${{safeSlug}}</span></td>
+                    <td>${{escapeHtml(item.beg)}}</td><td>${{escapeHtml(item.nov)}}</td><td>${{escapeHtml(item.int)}}</td><td>${{escapeHtml(item.adv)}}</td><td>${{escapeHtml(item.eli)}}</td>
                     <td style="display: flex; gap: 4px;">
-                        <button class="btn-tool" onclick="pywebview.api.copy_clipboard('${{item.slug}}')">Copy</button>
-                        <button class="btn-tool" onclick="pywebview.api.copy_clipboard('${{item.slug.replace(/-/g, '_')}} = \\'${{item.slug}}\\'')">Copy Py</button>
-                        <button class="btn-tool" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${{item.slug}}')">View ↗</button>
+                        <button class="btn-tool" onclick="copyText('${{safeSlug}}')">Copy</button>
+                        <button class="btn-tool" onclick="copyText('${{pyCode}}')">Copy Py</button>
+                        <button class="btn-tool" onclick="pywebview.api.open_url('https://strengthlevel.com/strength-standards/${{safeSlug}}')">View ↗</button>
                     </td>
                 `;
                 tbody.appendChild(tr);

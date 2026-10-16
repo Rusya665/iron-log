@@ -127,6 +127,39 @@ def _next_date_after(user_data: Dict[str, Any], n_sessions: int) -> List[str]:
 # ---------------------------------------------------------------------------
 
 
+def _load_sessions_module(sessions_file_path: str) -> Any:
+    """
+    Dynamically load a sessions.py file as a module using file location spec.
+
+    :param sessions_file_path: Absolute or relative path to sessions.py.
+    :return: Loaded module object.
+    """
+    import importlib
+    import importlib.util
+    import sys
+
+    sessions_file_path = str(sessions_file_path).strip(" '\"")
+    if os.path.isdir(sessions_file_path):
+        sessions_file_path = os.path.join(sessions_file_path, "sessions.py")
+
+    sessions_dir = os.path.dirname(os.path.abspath(sessions_file_path))
+    if sessions_dir not in sys.path:
+        sys.path.insert(0, sessions_dir)
+
+    importlib.invalidate_caches()
+    spec = importlib.util.spec_from_file_location("sessions", sessions_file_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Could not load module spec for {sessions_file_path}")
+    sess_mod = importlib.util.module_from_spec(spec)
+    sys.modules["sessions"] = sess_mod
+    try:
+        spec.loader.exec_module(sess_mod)
+        return sess_mod
+    except Exception:
+        sys.modules.pop("sessions", None)
+        raise
+
+
 def build_planned_sessions(
     sessions_file_path: str, day_numbers: List[int]
 ) -> List[PlannedSession]:
@@ -144,15 +177,7 @@ def build_planned_sessions(
         lines = content.splitlines()
 
     # Attempt to load sessions module to get USER_DATA + EXERCISE_REGISTRY
-    import importlib
-    import sys
-
-    sessions_dir = str(__import__("pathlib").Path(sessions_file_path).parent)
-    if sessions_dir not in sys.path:
-        sys.path.insert(0, sessions_dir)
-    import sessions as sess_mod
-
-    importlib.reload(sess_mod)
+    sess_mod = _load_sessions_module(sessions_file_path)
 
     # Build display-name lookup from EXERCISE_STANDARDS
     id_to_name = {
@@ -261,21 +286,20 @@ def build_planned_sessions(
             for key, val in day_data.items():
                 if not isinstance(val, Log):
                     continue
-                ex_id = key.replace("-", "_")
-
-                # Exclude uppercase constants imported from core.standards by preferring lowercase vars
+                norm_key = key.lower().replace("-", "_")
                 matches = [
-                    v for v, eid in var_to_id.items() if eid.lower() == ex_id.lower()
+                    v for v, eid in var_to_id.items()
+                    if eid.lower().replace("-", "_") == norm_key
                 ]
-                var_name = ex_id
+                var_name = norm_key
                 if matches:
-                    # Prefer lowercase variables (e.g. 'dips' instead of 'DIPS')
                     lower_matches = [m for m in matches if m.islower()]
                     var_name = lower_matches[0] if lower_matches else matches[0]
 
                 display = (
-                    id_to_name.get(ex_id)
-                    or id_to_name.get(ex_id.lower())
+                    id_to_name.get(key)
+                    or id_to_name.get(key.lower())
+                    or id_to_name.get(key.lower().replace("_", "-"))
                     or var_name.replace("_", " ").title()
                 )
                 progression = _suggest_progression(val.reps, val.mass)
@@ -363,13 +387,7 @@ def build_pre_deload_baseline(
         lines = f.read().splitlines()
 
     # -- load module for display-name + var_name resolution ------------------
-    import importlib, sys
-
-    sessions_dir = str(__import__("pathlib").Path(sessions_file_path).parent)
-    if sessions_dir not in sys.path:
-        sys.path.insert(0, sessions_dir)
-    import sessions as sess_mod
-    importlib.reload(sess_mod)
+    sess_mod = _load_sessions_module(sessions_file_path)
 
     id_to_name = {
         slug: info.get("name", slug) for slug, info in EXERCISE_STANDARDS.items()
@@ -483,18 +501,8 @@ def resolve_exercise_vars(
     var_to_id: Dict[str, str] = {}
     defined_vars: Set[str] = set()
 
-    sessions_dir = str(__import__("pathlib").Path(sessions_file_path).parent)
-    import sys
-
-    if sessions_dir not in sys.path:
-        sys.path.insert(0, sessions_dir)
-
     try:
-        import importlib
-        import sessions as sess_mod
-
-        importlib.reload(sess_mod)
-
+        sess_mod = _load_sessions_module(sessions_file_path)
         for attr in dir(sess_mod):
             val = getattr(sess_mod, attr)
             if (
@@ -687,8 +695,26 @@ def write_planned_sessions(
             else:
                 lines[user_data_start:user_data_start] = defs
 
+    def _sanitize_comment(c: str) -> str:
+        return re.sub(r"[\r\n]+", " ", c or "").strip()
+
+    def _sanitize_numeric_list(val: Any, count: int) -> str:
+        tokens = [x.strip() for x in str(val).split(",")] if "," in str(val) else [str(val).strip()] * count
+        clean = []
+        for t in tokens:
+            try:
+                num = float(t)
+                clean.append(f"{int(num)}" if num.is_integer() else f"{num}")
+            except (ValueError, TypeError):
+                clean.append("0")
+        return ", ".join(clean)
+
     injection_lines: List[str] = []
     for ps in planned:
+        date_str = str(ps.date_str).strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+            raise ValueError(f"Invalid date format: {date_str}")
+
         reps_mass_comment = []
         for ex in ps.exercises:
             var_to_use = resolved_map.get(ex.var_name)
@@ -699,23 +725,16 @@ def write_planned_sessions(
                 if var_to_use[0].isdigit():
                     var_to_use = "_" + var_to_use
 
-            r_str = (
-                ex.reps
-                if "," in str(ex.reps)
-                else ", ".join(str(ex.reps) for _ in range(ex.sets))
-            )
-            m_str = (
-                ex.mass
-                if "," in str(ex.mass)
-                else ", ".join(str(ex.mass) for _ in range(ex.sets))
-            )
-            comment_part = f"  # {ex.comment}" if ex.comment.strip() else "  #"
+            r_str = _sanitize_numeric_list(ex.reps, ex.sets)
+            m_str = _sanitize_numeric_list(ex.mass, ex.sets)
+            clean_comm = _sanitize_comment(ex.comment)
+            comment_part = f"  # {clean_comm}" if clean_comm else "  #"
             reps_mass_comment.append(
                 f"        {var_to_use}: Log([{r_str}], [{m_str}]),{comment_part}"
             )
 
         injection_lines.append("")
-        injection_lines.append(f'    "{ps.date_str}": {{  # Day {ps.day_number}')
+        injection_lines.append(f'    "{date_str}": {{  # Day {ps.day_number}')
         injection_lines.append(f"        day: {ps.day_number},")
         injection_lines.extend(reps_mass_comment)
         injection_lines.append("    },")
@@ -727,11 +746,10 @@ def write_planned_sessions(
     if user_data_start == -1:
         raise ValueError("Could not find 'USER_DATA = {' in sessions.py")
 
-    user_data_end = -1
-    for i in range(user_data_start + 1, len(lines)):
-        if lines[i] == "}":
-            user_data_end = i
-
+    user_data_end = next(
+        (i for i in range(user_data_start + 1, len(lines)) if lines[i].strip().startswith("}")),
+        -1,
+    )
     if user_data_end == -1:
         raise ValueError("Could not find closing '}' for USER_DATA")
 
@@ -755,12 +773,15 @@ def create_initial_sessions_py(
     """
     import os
 
+    owner_clean = repr(str(owner_name).replace("\r", "").replace("\n", ""))[1:-1]
+    sex_clean = "female" if str(sex).strip().lower() == "female" else "male"
+
     lines = [
         "from core.models import Exercise, Log",
         "from core.standards import *",
         "",
-        f'SESSIONS_OWNER = "{owner_name}"',
-        f'USER_SEX = "{sex}"',
+        f'SESSIONS_OWNER = "{owner_clean}"',
+        f'USER_SEX = "{sex_clean}"',
         "",
         "BODYMASS_LOG = {",
         "}",
@@ -798,9 +819,26 @@ def create_initial_sessions_py(
 
     lines.append("USER_DATA = {")
 
+    def _sanitize_comment(c: str) -> str:
+        return re.sub(r"[\r\n]+", " ", c or "").strip()
+
+    def _sanitize_numeric_list(val: Any, count: int) -> str:
+        tokens = [x.strip() for x in str(val).split(",")] if "," in str(val) else [str(val).strip()] * count
+        clean = []
+        for t in tokens:
+            try:
+                num = float(t)
+                clean.append(f"{int(num)}" if num.is_integer() else f"{num}")
+            except (ValueError, TypeError):
+                clean.append("0")
+        return ", ".join(clean)
+
     # Write the planned sessions
     for ps in planned:
-        lines.append(f'    "{ps.date_str}": {{  # Day {ps.day_number}')
+        date_str = str(ps.date_str).strip()
+        if not re.match(r"^\d{4}-\d{2}-\d{2}$", date_str):
+            continue
+        lines.append(f'    "{date_str}": {{  # Day {ps.day_number}')
         lines.append(f"        day: {ps.day_number},")
         for ex in ps.exercises:
             slug = re.sub(r"\W+", "_", ex.var_name.lower()).strip("_")
@@ -809,17 +847,10 @@ def create_initial_sessions_py(
             if slug[0].isdigit():
                 slug = "_" + slug
 
-            r_str = (
-                ex.reps
-                if "," in str(ex.reps)
-                else ", ".join(str(ex.reps) for _ in range(ex.sets))
-            )
-            m_str = (
-                ex.mass
-                if "," in str(ex.mass)
-                else ", ".join(str(ex.mass) for _ in range(ex.sets))
-            )
-            comment = f"  # {ex.comment}" if ex.comment.strip() else "  #"
+            r_str = _sanitize_numeric_list(ex.reps, ex.sets)
+            m_str = _sanitize_numeric_list(ex.mass, ex.sets)
+            clean_comm = _sanitize_comment(ex.comment)
+            comment = f"  # {clean_comm}" if clean_comm else "  #"
             lines.append(f"        {slug}: Log([{r_str}], [{m_str}]),{comment}")
         lines.append("    },")
 
@@ -997,7 +1028,15 @@ def calculate_gym_stats(user_data: Dict[str, Any]) -> Dict[str, Any]:
         for d, ex_set in raw_split_days_ex.items():
             split_days_exercises[d] = sorted([id_to_name.get(ex, ex) for ex in ex_set])
 
-        split_sessions_details = [{"date": s["date_str"], "day": s["day"]} for s in training_sessions[split_start_idx:]]
+        split_sessions_details = [
+            {
+                "date": s["date_str"],
+                "date_str": s["date_str"],
+                "day": s["day"],
+                "exercises": sorted([id_to_name.get(ex, ex) for ex in s["exercises"]]),
+            }
+            for s in training_sessions[split_start_idx:]
+        ]
 
     return {
         "total_days": total_days,
@@ -1009,6 +1048,7 @@ def calculate_gym_stats(user_data: Dict[str, Any]) -> Dict[str, Any]:
         "latest_workout_date": latest_workout_date,
         "latest_workout_day": latest_workout_day,
         "split_days_exercises": split_days_exercises,
-        "split_sessions_dates": split_sessions_details
+        "split_sessions_dates": split_sessions_details,
+        "split_sessions_details": split_sessions_details,
     }
 

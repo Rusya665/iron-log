@@ -2,6 +2,8 @@
 
 import glob
 import importlib
+import importlib.util
+import json
 import os
 import re
 import subprocess
@@ -21,6 +23,7 @@ from core.plan_generator import (
     PlannedSession,
     build_planned_sessions,
     calculate_gym_stats,
+    create_initial_sessions_py,
     days_to_generate,
     detect_cycle,
     write_planned_sessions,
@@ -48,6 +51,9 @@ class WebViewBridgeApi:
         """
         self.manager = ProfileManager()
         self.last_gen_time = ""
+        self._cached_user_mass: Optional[float] = None
+        self._cached_user_mass_profile: Optional[str] = None
+        self._last_sessions_error: Optional[str] = None
         self.update_status = {
             "state": "idle",
             "downloaded": 0,
@@ -56,6 +62,21 @@ class WebViewBridgeApi:
             "error": None,
         }
 
+    def _resolve_sessions_file(self, p: Optional[Profile]) -> Tuple[str, str]:
+        """
+        Resolve absolute path to sessions.py and its containing directory for a Profile.
+
+        :param p: Target profile instance.
+        :return: Tuple of (sessions_file_path, sessions_dir_path).
+        """
+        if not p or not p.sessions_dir:
+            return "", ""
+        s = str(p.sessions_dir).strip(" '\"")
+        if s.lower().endswith(".py") or os.path.isfile(s):
+            return s, os.path.dirname(os.path.abspath(s))
+        sessions_file = getattr(p, "sessions_file", None) or os.path.join(s, "sessions.py")
+        return sessions_file, s
+
     def _load_sessions(self, p: Profile) -> Tuple[Optional[Any], str]:
         """
         Dynamically import or reload the user's sessions.py module from their profile directory.
@@ -63,19 +84,42 @@ class WebViewBridgeApi:
         :param p: Target user profile instance.
         :return: Tuple containing loaded module (or None) and absolute sessions.py file path.
         """
-        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
-        if not os.path.exists(sessions_file):
+        self._last_sessions_error = None
+        sessions_file, sessions_dir = self._resolve_sessions_file(p)
+        if not sessions_file or not os.path.exists(sessions_file):
+            self._last_sessions_error = f"sessions.py not found at {sessions_file}"
             return None, sessions_file
 
-        sessions_dir = os.path.dirname(sessions_file)
-        if sessions_dir not in sys.path:
+        if sessions_dir and sessions_dir not in sys.path:
             sys.path.insert(0, sessions_dir)
 
-        if "sessions" in sys.modules:
-            sess = importlib.reload(sys.modules["sessions"])
-        else:
-            import sessions as sess
-        return sess, sessions_file
+        importlib.invalidate_caches()
+        try:
+            spec = importlib.util.spec_from_file_location("sessions", sessions_file)
+            if spec is None or spec.loader is None:
+                sys.modules.pop("sessions", None)
+                self._last_sessions_error = f"Could not create module spec for {sessions_file}"
+                return None, sessions_file
+            sess = importlib.util.module_from_spec(spec)
+            sys.modules["sessions"] = sess
+            spec.loader.exec_module(sess)
+            return sess, sessions_file
+        except SyntaxError as e:
+            sys.modules.pop("sessions", None)
+            line_info = f" line {e.lineno}" if e.lineno else ""
+            self._last_sessions_error = f"SyntaxError in sessions.py{line_info}: {e.msg}"
+            return None, sessions_file
+        except Exception as e:
+            sys.modules.pop("sessions", None)
+            tb = e.__traceback__
+            line_info = ""
+            while tb:
+                if os.path.abspath(tb.tb_frame.f_code.co_filename) == os.path.abspath(sessions_file):
+                    line_info = f" line {tb.tb_lineno}"
+                tb = tb.tb_next
+            exc_name = type(e).__name__
+            self._last_sessions_error = f"{exc_name} in sessions.py{line_info}: {e}"
+            return None, sessions_file
 
     def open_planner_window(self) -> Dict[str, Any]:
         """
@@ -153,6 +197,8 @@ class WebViewBridgeApi:
         :param index: Zero-based index of target profile in profile manager list.
         :return: Dictionary containing success indicator.
         """
+        self._cached_user_mass = None
+        self._cached_user_mass_profile = None
         self.manager.set_active(index)
         return {"success": True}
 
@@ -165,8 +211,12 @@ class WebViewBridgeApi:
         :param index: Target profile index if editing.
         :return: Dictionary with success status and optional error message.
         """
+        self._cached_user_mass = None
+        self._cached_user_mass_profile = None
         name = profile_data.get("name", "").strip()
-        s_dir = profile_data.get("sessions_dir", "").strip()
+        s_dir = profile_data.get("sessions_dir", "").strip(" '\"")
+        if s_dir.lower().endswith(".py") or os.path.isfile(s_dir):
+            s_dir = os.path.dirname(s_dir)
         sex = profile_data.get("sex", "male")
 
         if not name:
@@ -174,15 +224,35 @@ class WebViewBridgeApi:
         if not s_dir:
             return {"success": False, "error": "Data folder path cannot be empty."}
 
-        new_p = Profile(
-            name=name,
-            sessions_dir=s_dir,
-            output_dir=os.path.join(s_dir, "gym"),
-            sex=sex,
-        )
-        if is_edit:
+        sessions_file = os.path.join(s_dir, "sessions.py")
+        if not os.path.exists(sessions_file):
+            try:
+                os.makedirs(s_dir, exist_ok=True)
+                create_initial_sessions_py(sessions_file, name, sex, [])
+            except Exception as e:
+                print(f"Could not auto-create sessions.py: {e}")
+
+        if is_edit and 0 <= index < len(self.manager.profiles):
+            existing = self.manager.profiles[index]
+            new_p = Profile(
+                name=name,
+                sessions_dir=s_dir,
+                output_dir=existing.output_dir if (existing.output_dir and os.path.isabs(existing.output_dir)) else os.path.join(s_dir, "gym"),
+                age=existing.age,
+                sex=sex,
+                mass=existing.mass,
+                show_pr=existing.show_pr,
+                show_standards=existing.show_standards,
+                show_milestones=existing.show_milestones,
+            )
             self.manager.update_profile(index, new_p)
         else:
+            new_p = Profile(
+                name=name,
+                sessions_dir=s_dir,
+                output_dir=os.path.join(s_dir, "gym"),
+                sex=sex,
+            )
             self.manager.add_profile(new_p)
             self.manager.set_active(len(self.manager.profiles) - 1)
         return {"success": True}
@@ -194,6 +264,8 @@ class WebViewBridgeApi:
         :param index: Zero-based index of profile to delete.
         :return: Dictionary with success status and optional error message.
         """
+        self._cached_user_mass = None
+        self._cached_user_mass_profile = None
         if 0 <= index < len(self.manager.profiles):
             self.manager.delete_profile(index)
             return {"success": True}
@@ -205,14 +277,27 @@ class WebViewBridgeApi:
 
         :return: Selected absolute directory path, or empty string if cancelled.
         """
-        import tkinter as tk
-        from tkinter import filedialog
-        r = tk.Tk()
-        r.withdraw()
-        r.attributes("-topmost", True)
-        path = filedialog.askdirectory(parent=r)
-        r.destroy()
-        return path or ""
+        win = window_manager.get_main_window()
+        if win:
+            try:
+                res = win.create_file_dialog(webview.FOLDER_DIALOG)
+                if res and len(res) > 0:
+                    return res[0]
+                return ""
+            except Exception:
+                pass
+
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            r = tk.Tk()
+            r.withdraw()
+            r.attributes("-topmost", True)
+            path = filedialog.askdirectory(parent=r)
+            r.destroy()
+            return path or ""
+        except Exception:
+            return ""
 
     def check_updates(self) -> Dict[str, Any]:
         """
@@ -288,7 +373,7 @@ class WebViewBridgeApi:
 
         sess, file_path = self._load_sessions(p)
         if not sess:
-            return {"success": False, "error": f"sessions.py not found at {file_path}"}
+            return {"success": False, "error": self._last_sessions_error or f"sessions.py not found at {file_path}"}
 
         user_data = getattr(sess, "USER_DATA", {})
         bm_log = getattr(sess, "BODYMASS_LOG", {})
@@ -389,21 +474,32 @@ class WebViewBridgeApi:
             return float(explicit_mass)
 
         p = self.manager.get_active_profile()
-        if p:
-            sess, _ = self._load_sessions(p)
-            if sess:
-                bm_log = getattr(sess, "BODYMASS_LOG", {})
-                if bm_log:
-                    for d in sorted(bm_log.keys(), reverse=True):
-                        bm_data = bm_log[d]
-                        m = bm_data if isinstance(bm_data, (int, float)) else (bm_data.get("mass") or bm_data.get("weight"))
-                        if m and float(m) > 0:
-                            return float(m)
+        if not p:
+            return None
+
+        if self._cached_user_mass_profile == p.name and self._cached_user_mass is not None:
+            return self._cached_user_mass
+
+        mass_val = None
+        sess, _ = self._load_sessions(p)
+        if sess:
+            bm_log = getattr(sess, "BODYMASS_LOG", {})
+            if bm_log:
+                for d in sorted(bm_log.keys(), reverse=True):
+                    bm_data = bm_log[d]
+                    m = bm_data if isinstance(bm_data, (int, float)) else (bm_data.get("mass") or bm_data.get("weight"))
+                    if m and float(m) > 0:
+                        mass_val = float(m)
+                        break
+
+        if mass_val is None:
             prof_mass = getattr(p, "mass", 0.0)
             if prof_mass and float(prof_mass) > 0:
-                return float(prof_mass)
+                mass_val = float(prof_mass)
 
-        return None
+        self._cached_user_mass = mass_val
+        self._cached_user_mass_profile = p.name
+        return mass_val
 
     @staticmethod
     def _calculate_target_bm(mass: Optional[float]) -> Optional[int]:
@@ -451,8 +547,9 @@ class WebViewBridgeApi:
 
         sess, _ = self._load_sessions(p)
         if not sess:
-            return {"success": False, "error": "Could not load sessions.py"}
+            return {"success": False, "error": self._last_sessions_error or "Could not load sessions.py"}
 
+        processor = None
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d_%H%M")
             filename = os.path.join(p.output_dir, f"Training_Log_{timestamp}.xlsx")
@@ -475,13 +572,24 @@ class WebViewBridgeApi:
 
             self.last_gen_time = datetime.now().strftime("%Y-%m-%d %H:%M")
             try:
-                os.startfile(filename)
+                if sys.platform == "win32":
+                    os.startfile(filename)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", filename])
+                else:
+                    subprocess.Popen(["xdg-open", filename])
             except Exception:
                 pass
 
             return {"success": True, "time": self.last_gen_time}
         except Exception as e:
             return {"success": False, "error": str(e)}
+        finally:
+            if processor:
+                try:
+                    processor.close()
+                except Exception:
+                    pass
 
     def run_scraper(self) -> Dict[str, Any]:
         """
@@ -507,9 +615,10 @@ class WebViewBridgeApi:
             return {"success": False, "error": "No active profile"}
         sess, _ = self._load_sessions(p)
         if not sess:
-            return {"success": False, "error": "Could not load sessions.py"}
+            return {"success": False, "error": self._last_sessions_error or "Could not load sessions.py"}
 
         dummy_path = os.path.join(tempfile.gettempdir(), "_ironlog_validate_dummy.xlsx")
+        processor = None
         try:
             processor = TrainingLogProcessor(
                 dummy_path,
@@ -526,32 +635,26 @@ class WebViewBridgeApi:
                 if date_pattern.match(d) and isinstance(v, dict) and v.get("mass") is None
             ]
 
-            try:
-                processor.wb.close()
-            except Exception:
-                pass
-            try:
-                os.remove(dummy_path)
-            except Exception:
-                pass
-
             return {
                 "success": True,
                 "message": "sessions.py is valid! No data mismatches found.",
                 "none_mass_dates": none_mass_dates,
             }
         except ValueError as ve:
-            try:
-                os.remove(dummy_path)
-            except Exception:
-                pass
             return {"success": False, "error": f"Validation Failed: {ve}"}
         except Exception as e:
+            return {"success": False, "error": f"Unexpected error: {e}"}
+        finally:
+            if processor:
+                try:
+                    processor.close()
+                except Exception:
+                    pass
             try:
-                os.remove(dummy_path)
+                if os.path.exists(dummy_path):
+                    os.remove(dummy_path)
             except Exception:
                 pass
-            return {"success": False, "error": f"Unexpected error: {e}"}
 
     def run_bodymass_prefill(self) -> Dict[str, Any]:
         """
@@ -562,13 +665,13 @@ class WebViewBridgeApi:
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No active profile"}
-        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
-        if not os.path.exists(sessions_file):
+        sessions_file, _ = self._resolve_sessions_file(p)
+        if not sessions_file or not os.path.exists(sessions_file):
             return {"success": False, "error": f"sessions.py not found at {sessions_file}"}
 
         sess, _ = self._load_sessions(p)
         if not sess:
-            return {"success": False, "error": "Could not load sessions.py"}
+            return {"success": False, "error": self._last_sessions_error or "Could not load sessions.py"}
 
         date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
         user_dates = {k for k in getattr(sess, "USER_DATA", {}).keys() if date_pattern.match(k)}
@@ -585,15 +688,21 @@ class WebViewBridgeApi:
         if start_line == -1:
             return {"success": False, "error": "Could not locate BODYMASS_LOG in sessions.py"}
 
-        close_line = next((i for i in range(start_line + 1, len(lines)) if lines[i].rstrip("\r\n") == "}"), -1)
-        if close_line == -1:
-            return {"success": False, "error": "Could not find closing brace of BODYMASS_LOG"}
-
         insert_text = "".join(f'    "{d}": {{"mass": None}},\n' for d in missing)
-        new_lines = lines[:close_line] + [insert_text] + lines[close_line:]
+
+        if re.search(r"BODYMASS_LOG\s*=\s*\{\s*\}", lines[start_line]):
+            lines[start_line] = f"BODYMASS_LOG = {{\n{insert_text}}}\n"
+        else:
+            close_line = next((i for i in range(start_line + 1, len(lines)) if lines[i].rstrip("\r\n").strip() == "}"), -1)
+            if close_line == -1:
+                return {"success": False, "error": "Could not find closing brace of BODYMASS_LOG"}
+            lines = lines[:close_line] + [insert_text] + lines[close_line:]
 
         with open(sessions_file, "w", encoding="utf-8") as f:
-            f.writelines(new_lines)
+            f.writelines(lines)
+
+        self._cached_user_mass = None
+        self._cached_user_mass_profile = None
 
         return {"success": True, "count": len(missing), "dates": missing}
 
@@ -608,7 +717,7 @@ class WebViewBridgeApi:
             return {"success": False, "error": "No active profile"}
         sess, _ = self._load_sessions(p)
         if not sess:
-            return {"success": False, "error": "Could not load sessions.py"}
+            return {"success": False, "error": self._last_sessions_error or "Could not load sessions.py"}
 
         date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
         none_entries = sorted([
@@ -627,24 +736,32 @@ class WebViewBridgeApi:
         p = self.manager.get_active_profile()
         if not p:
             return {"success": False, "error": "No active profile"}
-        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
-        if not os.path.exists(sessions_file):
-            return {"success": False, "error": "sessions.py not found"}
+        sessions_file, _ = self._resolve_sessions_file(p)
+        if not sessions_file or not os.path.exists(sessions_file):
+            return {"success": False, "error": f"sessions.py not found at {sessions_file}"}
 
         with open(sessions_file, "r", encoding="utf-8") as f:
             source = f.read()
 
         count = 0
+        date_pattern = re.compile(r"^\d{4}-\d{2}-\d{2}$")
         for date_str, val in updates.items():
+            if not date_pattern.match(str(date_str)):
+                continue
+            try:
+                num_val = float(val)
+            except (ValueError, TypeError):
+                continue
+
             old = f'"{date_str}": {{"mass": None}}'
-            new = f'"{date_str}": {{"mass": {val}}}'
+            new = f'"{date_str}": {{"mass": {num_val}}}'
             if old in source:
                 source = source.replace(old, new, 1)
                 count += 1
             else:
                 subbed, n = re.subn(
-                    rf'("{re.escape(date_str)}")\s*:\s*\{{"mass"\s*:\s*None\}}',
-                    rf'\1: {{"mass": {val}}}',
+                    rf'("{re.escape(str(date_str))}")\s*:\s*\{{"mass"\s*:\s*None\}}',
+                    rf'\1: {{"mass": {num_val}}}',
                     source,
                 )
                 if n > 0:
@@ -653,6 +770,9 @@ class WebViewBridgeApi:
 
         with open(sessions_file, "w", encoding="utf-8") as f:
             f.write(source)
+
+        self._cached_user_mass = None
+        self._cached_user_mass_profile = None
 
         return {"success": True, "count": count}
 
@@ -668,7 +788,7 @@ class WebViewBridgeApi:
 
         sess, file_path = self._load_sessions(p)
         if not sess:
-            return {"success": False, "error": "Could not load sessions.py"}
+            return {"success": False, "error": self._last_sessions_error or "Could not load sessions.py"}
 
         user_data = getattr(sess, "USER_DATA", {})
         N, last_day_int = detect_cycle(user_data)
@@ -720,7 +840,7 @@ class WebViewBridgeApi:
 
         sess, file_path = self._load_sessions(p)
         if not sess:
-            return {"success": False, "error": "Could not load sessions.py"}
+            return {"success": False, "error": self._last_sessions_error or "Could not load sessions.py"}
 
         user_data = getattr(sess, "USER_DATA", {})
         N, last_day_int = detect_cycle(user_data)
@@ -776,7 +896,7 @@ class WebViewBridgeApi:
         if not p:
             return {"success": False, "error": "No profile"}
 
-        sessions_file = getattr(p, "sessions_file", None) or os.path.join(p.sessions_dir, "sessions.py")
+        sessions_file, _ = self._resolve_sessions_file(p)
         try:
             planned_objs = []
             for d in planned_data:
@@ -795,7 +915,13 @@ class WebViewBridgeApi:
                     PlannedSession(day_number=int(d.get("day_num", 1)), date_str=d.get("date_str", ""), exercises=ex_objs)
                 )
 
-            write_planned_sessions(sessions_file, planned_objs)
+            if not os.path.exists(sessions_file):
+                os.makedirs(os.path.dirname(sessions_file), exist_ok=True)
+                create_initial_sessions_py(
+                    sessions_file, p.name, getattr(p, "sex", "male"), planned_objs
+                )
+            else:
+                write_planned_sessions(sessions_file, planned_objs)
 
             # Close standalone planner window if open and reload dashboard
             window_manager.close_planner_window()
@@ -841,18 +967,29 @@ class WebViewBridgeApi:
 
     def copy_clipboard(self, text: str) -> None:
         """
-        Copy text string to system clipboard using Tkinter.
+        Copy text string to system clipboard safely.
 
         :param text: Text string to copy.
         :return: None.
         """
-        import tkinter as tk
-        r = tk.Tk()
-        r.withdraw()
-        r.clipboard_clear()
-        r.clipboard_append(text)
-        r.update()
-        r.destroy()
+        win = window_manager.get_main_window()
+        if win:
+            try:
+                win.evaluate_js(f"navigator.clipboard.writeText({json.dumps(text)})")
+                return
+            except Exception:
+                pass
+
+        try:
+            import tkinter as tk
+            r = tk.Tk()
+            r.withdraw()
+            r.clipboard_clear()
+            r.clipboard_append(text)
+            r.update()
+            r.destroy()
+        except Exception:
+            pass
 
     def open_url(self, url: str) -> None:
         """
@@ -882,10 +1019,19 @@ class WebViewBridgeApi:
         :return: None.
         """
         p = self.manager.get_active_profile()
-        if p and p.sessions_dir:
-            f = os.path.join(p.sessions_dir, "sessions.py")
-            if os.path.exists(f):
-                os.startfile(f)
+        if not p:
+            return
+        f, _ = self._resolve_sessions_file(p)
+        if f and os.path.exists(f):
+            try:
+                if sys.platform == "win32":
+                    os.startfile(f)
+                elif sys.platform == "darwin":
+                    subprocess.Popen(["open", f])
+                else:
+                    subprocess.Popen(["xdg-open", f])
+            except Exception as e:
+                print(f"Error opening editor for {f}: {e}")
 
     def open_output(self) -> None:
         """

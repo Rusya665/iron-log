@@ -60,7 +60,7 @@ After direct side-by-side benchmarking and interactive testing, **PyWebView (Mic
 ## 3. Why PyWebView Was Chosen as the Clear Winner
 
 1. **Native OS Web Runtime**: Unlike Electron which ships a 150MB Chromium bundle with every app, `pywebview` taps directly into the Microsoft Edge WebView2 runtime already built into Windows 10/11.
-2. **Zero UI Freeze**: All heavyweight Python operations (Excel generation via `openpyxl`, regex session parsing, stats calculation) run in background daemon threads, keeping the 60/120 FPS web interface completely smooth and responsive.
+2. **Zero UI Freeze**: All heavyweight Python operations (Excel generation via `xlsxwriter`, regex session parsing, stats calculation) run in background daemon threads, keeping the 60/120 FPS web interface completely smooth and responsive.
 3. **True Web Design Expressiveness**:
    * Custom dark scrollbars (`#2E2E2E` thumb on `#121212` track).
    * Glassmorphism with `backdrop-filter: blur(8px)`.
@@ -71,7 +71,7 @@ After direct side-by-side benchmarking and interactive testing, **PyWebView (Mic
 
 ## 4. Detailed Feature Implementation in PyWebView
 
-The complete implementation is self-contained in [ui/desktop_webview.py](file:///d:/GoogleProjects/iron-log/ui/desktop_webview.py) and connects to Python via `WebViewBridgeApi`:
+The complete implementation is organized cleanly under `ui/` (`ui/app.py`, `ui/bridge.py`, `ui/templates/`) and connects to Python via `WebViewBridgeApi`:
 
 ### A. Left Sidebar (`width: 210px`, `#161616`)
 * **Profile Header**: Displays active user profile name and version subtitle.
@@ -178,16 +178,23 @@ iron-log/
 │   ├── plan_generator.py      # Split cycle detection, baseline builder & writer
 │   ├── profile_manager.py     # Multi-user profile management
 │   ├── standards.py           # Strength standards database & level calculations
-│   ├── xlsx_generator.py      # OpenPyXL generator for training workbook
-│   └── version.py             # Version tracking (v1.2.3)
+│   ├── xlsx_generator.py      # XlsxWriter generator for training workbook
+│   └── version.py             # Version tracking
 ├── ui/
-│   ├── desktop_webview.py     # 🏆 Primary GUI (Edge WebView2 + HTML5/CSS/JS)
-│   └── desktop.py             # 📦 Legacy Fallback GUI (CustomTkinter)
+│   ├── app.py                 # PyWebView application window lifecycle
+│   ├── bridge.py              # Python <-> JS Bridge API (WebViewBridgeApi)
+│   ├── desktop.py             # Public UI package entry points
+│   ├── window_manager.py      # Multi-window tracking
+│   └── templates/             # HTML5/CSS3/JS UI templates
 ├── docs/
-│   └── GUI_ENGINES_MIGRATION_REPORT.md  # 📄 THIS COMPREHENSIVE REPORT
-├── launch_all_guis.py         # ⚡ Interactive Dual-Engine Launcher (Webview & CTk)
-├── main.py                    # 🚀 Application entry point (defaults to webview)
-└── requirements.txt           # Dependencies (pywebview, customtkinter, openpyxl, etc.)
+│   └── GUI_ENGINES_MIGRATION_REPORT.md  # Handover documentation
+├── scripts/
+│   ├── batch_scraper.py       # Scraper for strength standards
+│   ├── export_split_xlsx.py   # Standalone split tracker exporter
+│   ├── parse_standards.py     # Standards parser tool
+│   └── release.py             # Release pipeline & tagging utility
+├── main.py                    # Application entry point (GUI or --cli)
+└── requirements.txt           # Project dependencies
 ```
 
 ---
@@ -195,27 +202,23 @@ iron-log/
 ## 8. Instructions for Future AI & Developers
 
 ### How to Run the Application:
-* **Default Mode (Modern PyWebView)**:
+* **Default Mode (Modern PyWebView GUI)**:
   ```powershell
   python main.py
-  ```
-* **Legacy CustomTkinter Fallback**:
-  ```powershell
-  python main.py --gui ctk
-  ```
-* **Dual-Engine Launcher**:
-  ```powershell
-  python launch_all_guis.py
   ```
 * **CLI Headless Excel Generation**:
   ```powershell
   python main.py --cli
   ```
+* **CLI Reconfigure Paths**:
+  ```powershell
+  python main.py --cli --reconfigure
+  ```
 
 ### Important Development Guidelines:
 1. **Frontend / Backend Separation**:
-   * All frontend visual changes belong in `HTML_TEMPLATE` in [ui/desktop_webview.py](file:///d:/GoogleProjects/iron-log/ui/desktop_webview.py).
-   * All backend bridge operations belong in `WebViewBridgeApi` in [ui/desktop_webview.py](file:///d:/GoogleProjects/iron-log/ui/desktop_webview.py).
+   * All frontend visual changes belong in `ui/templates/` (`main_window.py`, `planner_window.py`).
+   * All backend bridge operations belong in `WebViewBridgeApi` in `ui/bridge.py`.
 2. **Never Block the Main UI Thread**:
    * When invoking long-running file I/O or Excel generation, always spawn a worker thread (`threading.Thread(target=..., daemon=True).start()`) and post results back to the UI.
 3. **Data Integrity in `sessions.py`**:

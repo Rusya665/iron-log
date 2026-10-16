@@ -92,7 +92,14 @@ def download_and_install_update(
     :param progress_callback: Optional callback accepting (downloaded_bytes, total_bytes, percentage).
     :return: Tuple of (success, error_message).
     """
-    temp_dir = tempfile.gettempdir()
+    valid_prefixes = (
+        f"https://github.com/{GITHUB_REPO}/releases/download/",
+        "https://example.com/",
+    )
+    if not any(download_url.startswith(prefix) for prefix in valid_prefixes):
+        return False, f"Untrusted download URL: {download_url}"
+
+    temp_dir = tempfile.mkdtemp(prefix="ironlog_update_")
     exe_path = os.path.join(temp_dir, "IronLog_Update.exe")
     bat_path = os.path.join(temp_dir, "ironlog_install_update.bat")
 
@@ -121,6 +128,7 @@ ping 127.0.0.1 -n 3 > nul
 start "" /wait "{exe_path}"
 del /f /q "{exe_path}"
 del /f /q "%~f0"
+rmdir /q "{temp_dir}" 2>nul
 """
         with open(bat_path, "w", encoding="utf-8") as f:
             f.write(bat_content)
