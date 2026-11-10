@@ -217,8 +217,39 @@ def generate_classic_tracker(sessions_path: str, output_path: str, min_weeks: in
 
     # 2. Split Detection
     stats = calculate_gym_stats(user_data)
-    split_sessions = stats.get("split_sessions_dates", [])
+    split_sessions = list(stats.get("split_sessions_dates", []))
     cycle_len = stats.get("cycle_length", 3) or 3
+    split_start = stats.get("current_split_start")
+
+    # Include PR sessions in the active split by mapping them to their split day (1, 2, ... cycle_len)
+    split_days_ex = stats.get("split_days_exercises", {})
+    logged_dates = {s["date"] for s in split_sessions}
+    all_split_dates = sorted([d for d in user_data.keys() if split_start and d >= split_start])
+
+    for d_str in all_split_dates:
+        if d_str in logged_dates:
+            continue
+        day_data = user_data[d_str]
+        day_val = day_data.get("day")
+        if isinstance(day_val, str) and day_val.upper() == "PR":
+            exs = {k.lower().replace("-", "_") for k, v in day_data.items() if isinstance(v, Log)}
+            best_day = None
+            best_overlap = -1
+            for dn in range(1, cycle_len + 1):
+                ref_exs = {e.lower().replace(" ", "_").replace("-", "_") for e in split_days_ex.get(dn, [])}
+                overlap = len(exs.intersection(ref_exs))
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_day = dn
+            if best_day is not None and best_overlap > 0:
+                split_sessions.append({
+                    "date": d_str,
+                    "day": best_day,
+                    "is_pr": True,
+                    "exercises": set(day_data.keys()),
+                })
+
+    split_sessions.sort(key=lambda x: x["date"])
 
     if not split_sessions:
         raise ValueError("No active split sessions found in USER_DATA.")
@@ -240,6 +271,7 @@ def generate_classic_tracker(sessions_path: str, output_path: str, min_weeks: in
         weeks_sessions.setdefault(current_week, {})[d_num] = {
             "date": d_str,
             "data": user_data.get(d_str, {}),
+            "is_pr": s.get("is_pr", False),
         }
 
     total_weeks = max(min_weeks, max(weeks_sessions.keys()) if weeks_sessions else min_weeks)
@@ -285,15 +317,17 @@ def generate_classic_tracker(sessions_path: str, output_path: str, min_weeks: in
         # Calculate date range for this week
         if sess_dict_for_w:
             w_dates = [datetime.strptime(info["date"], "%Y-%m-%d") for info in sess_dict_for_w.values() if "date" in info]
+            is_pr_week = any(info.get("is_pr") for info in sess_dict_for_w.values())
+            pr_tag = " [PR]" if is_pr_week else ""
             if w_dates:
                 d_min = min(w_dates).strftime("%d.%m")
                 d_max = max(w_dates).strftime("%d.%m")
                 if d_min == d_max:
-                    week_label = f"WEEK {w} ({d_min})"
+                    week_label = f"WEEK {w} ({d_min}){pr_tag}"
                 else:
-                    week_label = f"WEEK {w} ({d_min} - {d_max})"
+                    week_label = f"WEEK {w} ({d_min} - {d_max}){pr_tag}"
             else:
-                week_label = f"WEEK {w}"
+                week_label = f"WEEK {w}{pr_tag}"
         else:
             week_label = f"WEEK {w}"
 
@@ -372,7 +406,7 @@ def generate_classic_tracker(sessions_path: str, output_path: str, min_weeks: in
                         if note_text:
                             notes_c.value = note_text
                             notes_c.fill = fill_highlight
-                            if "+" in note_text or "restored" in note_text or "deload" in note_text:
+                            if "+" in note_text or "restored" in note_text or "deload" in note_text or "PR" in note_text or "pr" in note_text:
                                 mass_c.fill = fill_highlight
 
             ws.row_dimensions[row_cursor].height = 20.0
