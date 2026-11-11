@@ -229,6 +229,42 @@ class TestXlsxGenerator(unittest.TestCase):
         with self.assertRaises(ValueError):
             processor.validate_data()
 
+    def test_weighted_pullups_graded_against_weighted_standards(self) -> None:
+        """
+        Verify weighted pull-ups PR (+37.5 kg @ 86.45 kg BW) grades as Intermediate, not Elite.
+
+        :return: None
+        """
+        exercises = [Exercise(id="pull-ups", display_name="Pull Ups")]
+        bm_log = {"2026-09-24": {"mass": 86.45}}
+        data = {
+            "2026-09-17": {"day": 3, "pull-ups": Log(reps=[7, 7, 6], mass=[22.5, 22.5, 22.5])},
+            "2026-11-10": {"day": "PR", "pull-ups": Log(reps=[1], mass=[37.5])},
+        }
+        processor = TrainingLogProcessor(
+            self.output_xlsx, exercises, data, bm_log, self.user_profile
+        )
+        processor.validate_data()
+        processor.write_headers()
+        processor.process_data(data)
+        processor.write_calculations()
+        processor.generate_charts()
+        processor.write_definitions()
+        processor.write_personal_records()
+        processor.write_user_profile()
+        processor.save()
+
+        wb = openpyxl.load_workbook(self.output_xlsx)
+        ws = wb["Personal_Records"]
+        # Row 2: Training PRs (22.5 kg -> Novice) | PR Session Bests (37.5 kg -> Intermediate)
+        self.assertEqual(ws["A2"].value, "Pull Ups")
+        self.assertEqual(ws["B2"].value, 22.5)
+        self.assertEqual(ws["D2"].value, "Novice")
+        self.assertEqual(ws["F2"].value, "Pull Ups")
+        self.assertEqual(ws["G2"].value, 37.5)
+        self.assertEqual(ws["I2"].value, "Intermediate")
+        wb.close()
+
 
 if __name__ == "__main__":
     unittest.main()

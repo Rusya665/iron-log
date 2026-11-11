@@ -14,6 +14,7 @@ from core.plan_generator import (
     _is_deload_block,
     _next_date_after,
     _suggest_progression,
+    build_planned_sessions,
     build_pre_deload_baseline,
     calculate_gym_stats,
     days_to_generate,
@@ -243,6 +244,129 @@ USER_DATA = {
         self.assertEqual(stats["total_days"], 3)
         self.assertEqual(stats["latest_workout_date"], "2026-01-09")
         self.assertEqual(stats["latest_workout_day"], 3)
+
+    def test_build_planned_sessions_alternating_exercises(self) -> None:
+        """
+        Verify planner rotates alternating Week A / Week B exercises and restores pre-deload alternation.
+
+        :return: None
+        """
+        temp_dir = tempfile.mkdtemp()
+        sessions_file = os.path.join(temp_dir, "sessions.py")
+
+        sample_code = """
+from core.models import Log
+
+day = "day"
+bench_press = "bench-press"
+dumbbell_bench_press = "dumbbell-bench-press"
+dips = "dips"
+pull_ups = "pull-ups"
+
+USER_DATA = {
+    "2026-11-26": {  # Day 3
+        day: 3,
+        bench_press: Log([4, 4, 4], [85, 85, 85]),
+        dumbbell_bench_press: Log([8, 8, 8], [27.5, 27.5, 27.5]),
+        pull_ups: Log([6, 6, 6], [15, 15, 15]),
+    },
+    "2026-12-03": {  # Day 3
+        day: 3,
+        bench_press: Log([4, 4, 4], [87.5, 87.5, 87.5]),
+        dips: Log([8, 8, 8], [15, 15, 15]),
+        pull_ups: Log([6, 6, 6], [17.5, 17.5, 17.5]),
+    },
+}
+"""
+        try:
+            with open(sessions_file, "w", encoding="utf-8") as f:
+                f.write(sample_code)
+
+            # After Week A (DB Bench 27.5) -> Week B (Dips 15), Week 3 must plan DB Bench @ 27.5
+            planned_w3 = build_planned_sessions(sessions_file, [3])
+            self.assertEqual(len(planned_w3), 1)
+            w3_vars = [e.var_name for e in planned_w3[0].exercises]
+            self.assertEqual(w3_vars, ["bench_press", "dumbbell_bench_press", "pull_ups"])
+            w3_map = {e.var_name: e for e in planned_w3[0].exercises}
+            self.assertEqual(w3_map["dumbbell_bench_press"].mass, "27.5")
+            self.assertEqual(w3_map["bench_press"].mass, "87.5")
+
+            # Add Week 3 (DB Bench 30) + Week 4 Deload, then verify pre-deload restores Dips @ 15
+            idx = sample_code.rfind("}")
+            sample_code_with_deload = (
+                sample_code[:idx]
+                + """    "2026-12-10": {  # Day 3
+        day: 3,
+        bench_press: Log([3, 3, 3], [90, 90, 90]),
+        dumbbell_bench_press: Log([8, 8, 8], [30, 30, 30]),
+        pull_ups: Log([6, 6, 6], [20, 20, 20]),
+    },
+    "2026-12-17": {  # Day 3
+        day: 3,
+        bench_press: Log([3, 3, 3], [70, 70, 70]),  # deload
+        dumbbell_bench_press: Log([8, 8, 8], [22.5, 22.5, 22.5]),  # deload
+        pull_ups: Log([6, 6, 6], [10, 10, 10]),  # deload
+    },
+}
+"""
+            )
+            with open(sessions_file, "w", encoding="utf-8") as f:
+                f.write(sample_code_with_deload)
+
+            restored = build_pre_deload_baseline(sessions_file, [3], 100.0)
+            restored_vars = [e.var_name for e in restored[0].exercises]
+            self.assertEqual(restored_vars, ["bench_press", "dips", "pull_ups"])
+            restored_map = {e.var_name: e for e in restored[0].exercises}
+            self.assertEqual(restored_map["dips"].mass, "15")
+        finally:
+            shutil.rmtree(temp_dir)
+
+    def test_build_planned_sessions_rare_substitute_guard(self) -> None:
+        """
+        Verify a rare 1-off substitute neither hijacks an established primary nor prevents recovery to it.
+
+        :return: None
+        """
+        temp_dir = tempfile.mkdtemp()
+        sessions_file = os.path.join(temp_dir, "sessions.py")
+
+        # Day 1 has 4x Smith + 1x Seated (latest is Smith -> should stay Smith)
+        # Day 2 has 3x Smith then 1x Seated (latest is Seated -> should recover to Smith)
+        sample_code = """
+from core.models import Log
+
+day = "day"
+squat = "squat"
+pause_squat = "pause-squat"
+dead_lift = "deadlift"
+pause_deadlift = "pause-deadlift"
+crunches = "crunches"
+smith_calf = "smith-calf"
+seated_calf = "seated-calf"
+
+USER_DATA = {
+    "2026-10-01": {day: 1, squat: Log([5], [100]), pause_squat: Log([5], [80]), smith_calf: Log([8], [20]), crunches: Log([15], [0])},
+    "2026-10-03": {day: 2, dead_lift: Log([5], [140]), pause_deadlift: Log([5], [115]), smith_calf: Log([8], [25]), crunches: Log([15], [0])},
+    "2026-10-08": {day: 1, squat: Log([5], [100]), pause_squat: Log([5], [80]), smith_calf: Log([8], [20]), crunches: Log([15], [0])},
+    "2026-10-10": {day: 2, dead_lift: Log([5], [140]), pause_deadlift: Log([5], [115]), smith_calf: Log([8], [25]), crunches: Log([15], [0])},
+    "2026-10-15": {day: 1, squat: Log([5], [100]), pause_squat: Log([5], [80]), smith_calf: Log([8], [20]), crunches: Log([15], [0])},
+    "2026-10-17": {day: 2, dead_lift: Log([5], [140]), pause_deadlift: Log([5], [115]), smith_calf: Log([8], [30]), crunches: Log([15], [0])},
+    "2026-10-22": {day: 1, squat: Log([5], [100]), pause_squat: Log([5], [80]), seated_calf: Log([8], [55]), crunches: Log([15], [0])},
+    "2026-10-29": {day: 1, squat: Log([5], [100]), pause_squat: Log([5], [80]), smith_calf: Log([8], [22.5]), crunches: Log([15], [0])},
+    "2026-11-01": {day: 2, dead_lift: Log([5], [140]), pause_deadlift: Log([5], [115]), seated_calf: Log([8], [50]), crunches: Log([15], [0])},
+}
+"""
+        try:
+            with open(sessions_file, "w", encoding="utf-8") as f:
+                f.write(sample_code)
+
+            planned = build_planned_sessions(sessions_file, [1, 2])
+            d1_vars = [e.var_name for e in planned[0].exercises]
+            d2_vars = [e.var_name for e in planned[1].exercises]
+            self.assertEqual(d1_vars, ["squat", "pause_squat", "smith_calf", "crunches"])
+            self.assertEqual(d2_vars, ["dead_lift", "pause_deadlift", "smith_calf", "crunches"])
+        finally:
+            shutil.rmtree(temp_dir)
 
 
 if __name__ == "__main__":

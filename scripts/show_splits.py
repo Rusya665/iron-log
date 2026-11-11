@@ -57,19 +57,37 @@ def resolve_day_slots(sessions_list: list) -> tuple:
     if not primary:
         primary = [e for e, _ in ex_counts.most_common(6)]
 
-    # Sort primaries by average execution order in the workout
-    primary.sort(key=lambda e: ex_avg_pos[e])
+    # Collapse alternating primaries (e.g. 50/50 Week A / Week B rotation) that never co-occur in the same slot
+    primary_by_freq = sorted(primary, key=lambda e: (-ex_counts[e], list(ex_counts.keys()).index(e)))
+    anchors = []
+    slot_alts = defaultdict(list)
+
+    for cand in primary_by_freq:
+        best_anchor = None
+        best_dist = 999.0
+        for anch in anchors:
+            co_occur = sum(1 for s in sessions_list if anch in s and cand in s)
+            if co_occur == 0:
+                dist = abs(ex_avg_pos[anch] - ex_avg_pos[cand])
+                if dist < 0.35 and dist < best_dist:
+                    best_dist = dist
+                    best_anchor = anch
+        if best_anchor:
+            slot_alts[best_anchor].append(cand)
+        else:
+            anchors.append(cand)
+
+    # Sort slot anchors by average execution order in the workout
+    anchors.sort(key=lambda e: ex_avg_pos[e])
 
     # Detect substitutes from remaining less-frequent exercises
     remaining = [e for e in ex_counts.keys() if e not in primary]
-
-    slot_alts = defaultdict(list)
     unassigned = []
 
     for other in remaining:
         best_prim = None
         best_dist = 999.0
-        for prim in primary:
+        for prim in anchors:
             # Check mutual exclusivity (exercises that replace each other rarely co-occur in the same session)
             co_occur = sum(1 for s in sessions_list if prim in s and other in s)
             if co_occur == 0:
@@ -83,7 +101,7 @@ def resolve_day_slots(sessions_list: list) -> tuple:
             unassigned.append(other)
 
     results = []
-    for prim in primary:
+    for prim in anchors:
         alts = slot_alts.get(prim, [])
         results.append((prim, alts))
 

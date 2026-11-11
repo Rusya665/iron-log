@@ -327,7 +327,7 @@ def parse_table(table: Any) -> Optional[Dict[int, Dict[str, int]]]:
                 ]
                 for i, name in enumerate(level_names, 1):
                     val_text = cols[i].text.strip().replace(",", "")
-                    val_match = re.search(r"(\d+)", val_text)
+                    val_match = re.search(r"([+-]?\d+)", val_text)
                     levels[name] = int(val_match.group(1)) if val_match else 0
 
                 parsed_data[bw] = levels

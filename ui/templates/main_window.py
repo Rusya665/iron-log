@@ -1098,7 +1098,7 @@ HTML_TEMPLATE = f"""
                 sess.exercises.forEach(ex => {{
                     exsHtml += `
                         <div class="ex-item">
-                            <span class="ex-name" onmouseenter="showTooltip(event, '${{ex.id}}', ${{sess.mass || 0}}, ${{ex.max_lift || 0}}, ${{isPR}})" onmouseleave="hideTooltip()">${{ex.name}}</span>
+                            <span class="ex-name" onmouseenter="showTooltip(event, '${{ex.id}}', ${{sess.mass || 0}}, ${{ex.max_lift || 0}}, ${{isPR}}, ${{Boolean(ex.is_weighted)}})" onmouseleave="hideTooltip()">${{ex.name}}</span>
                             <span class="ex-meta">${{ex.summary}}</span>
                         </div>
                     `;
@@ -1121,13 +1121,13 @@ HTML_TEMPLATE = f"""
 
         /* ── Hover Standards Tooltip ──────────────────────────────────────── */
         let tooltipTimer = null;
-        async function showTooltip(e, exId, userMass, userLift, isPR) {{
+        async function showTooltip(e, exId, userMass, userLift, isPR, isWeighted = false) {{
             clearTimeout(tooltipTimer);
             const x = e.clientX + 14;
             const y = e.clientY + 14;
             
             tooltipTimer = setTimeout(async () => {{
-                const tableData = await pywebview.api.get_exercise_standards_table(exId, userMass);
+                const tableData = await pywebview.api.get_exercise_standards_table(exId, userMass, isWeighted);
                 const tip = document.getElementById("standardsTooltip");
                 
                 if (!tableData || !tableData.standards || Object.keys(tableData.standards).length === 0) {{
@@ -1135,12 +1135,13 @@ HTML_TEMPLATE = f"""
                 }} else {{
                     let rowsHtml = "";
                     const targetBm = tableData.target_bm;
+                    const unitSuffix = tableData.unit === "reps" ? " (Reps)" : " (kg)";
                     
                     for (const [bm, levels] of Object.entries(tableData.standards)) {{
                         const isUserBm = Boolean(targetBm && parseInt(bm) === targetBm);
                         let cells = `<td>${{bm}}kg</td>`;
                         for (const lvl of ["Beginner", "Novice", "Intermediate", "Advanced", "Elite"]) {{
-                            const val = levels[lvl] || "-";
+                            const val = levels[lvl] !== undefined ? levels[lvl] : "-";
                             const achieved = isPR && typeof val === 'number' && userLift >= val;
                             cells += `<td class="${{achieved ? 'achieved' : ''}}">${{val}}</td>`;
                         }}
@@ -1148,7 +1149,7 @@ HTML_TEMPLATE = f"""
                     }}
 
                     tip.innerHTML = `
-                        <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px; color: #FFF; font-family: 'Outfit', sans-serif;">${{tableData.name}} Standards</div>
+                        <div style="font-size: 12px; font-weight: 700; margin-bottom: 6px; color: #FFF; font-family: 'Outfit', sans-serif;">${{tableData.name}} Standards${{unitSuffix}}</div>
                         <table>
                             <thead><tr><th>Mass</th><th>Beg</th><th>Nov</th><th>Int</th><th>Adv</th><th>Eli</th></tr></thead>
                             <tbody>${{rowsHtml}}</tbody>

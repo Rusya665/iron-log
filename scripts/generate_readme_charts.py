@@ -596,14 +596,21 @@ def generate_individual_progress(ex_id: str, display_name: str, filename: str) -
         if ex_id in day_data:
             log = day_data[ex_id]
             if isinstance(log, Log) and log.reps:
+                is_bw_entry = not log.mass or max(log.mass) == 0
+                if not is_bodyweight and is_bw_entry:
+                    continue
                 cap = calc_brzycki(log)
                 lv = -1
-                for lvl_idx, lvl_name in enumerate(LEVELS_ORDER):
-                    std_val = get_exercise_standard(
-                        ex_id, date_str, BODYMASS_LOG, lvl_name, sex=user_sex
-                    )
-                    if std_val > 0 and cap >= std_val:
-                        lv = lvl_idx
+                eli_val = get_exercise_standard(
+                    ex_id, date_str, BODYMASS_LOG, "Elite", sex=user_sex, weighted=not is_bodyweight
+                )
+                if eli_val > 0:
+                    for lvl_idx, lvl_name in enumerate(LEVELS_ORDER):
+                        std_val = get_exercise_standard(
+                            ex_id, date_str, BODYMASS_LOG, lvl_name, sex=user_sex, weighted=not is_bodyweight
+                        )
+                        if (std_val > 0 or lvl_idx == 0) and cap >= std_val:
+                            lv = lvl_idx
                 if lv > highest_lvl_idx:
                     highest_lvl_idx = lv
 
@@ -625,7 +632,7 @@ def generate_individual_progress(ex_id: str, display_name: str, filename: str) -
     last_date_str = sorted(USER_DATA.keys())[-1]
     for lvl_name in LEVELS_ORDER:
         std_val = get_exercise_standard(
-            ex_id, last_date_str, BODYMASS_LOG, lvl_name, sex=user_sex
+            ex_id, last_date_str, BODYMASS_LOG, lvl_name, sex=user_sex, weighted=not is_bodyweight
         )
         if std_val > max_val:
             y_max = max(y_max, int(std_val * 1.10))
@@ -643,11 +650,17 @@ def generate_individual_progress(ex_id: str, display_name: str, filename: str) -
         while curr <= max_date:
             full_dates.append(curr)
             curr_str = curr.strftime("%Y-%m-%d")
+            eli_val = get_exercise_standard(
+                ex_id, curr_str, BODYMASS_LOG, "Elite", sex=user_sex, weighted=not is_bodyweight
+            )
             for lvl_name in LEVELS_ORDER:
-                std_val = get_exercise_standard(
-                    ex_id, curr_str, BODYMASS_LOG, lvl_name, sex=user_sex
-                )
-                std_lines[lvl_name].append(std_val if std_val > 0 else None)
+                if eli_val == 0:
+                    std_lines[lvl_name].append(None)
+                else:
+                    std_val = get_exercise_standard(
+                        ex_id, curr_str, BODYMASS_LOG, lvl_name, sex=user_sex, weighted=not is_bodyweight
+                    )
+                    std_lines[lvl_name].append(std_val if (std_val > 0 or lvl_name == "Beginner") else None)
             curr += timedelta(days=1)
 
     fig, ax = plt.subplots(figsize=(8, 4.5), dpi=100)

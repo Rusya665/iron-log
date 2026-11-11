@@ -106,6 +106,35 @@ class TestStandards(unittest.TestCase):
         self.assertIsNone(WebViewBridgeApi._calculate_target_bm(0))
         self.assertIsNone(WebViewBridgeApi._calculate_target_bm(-5.0))
 
+    def test_dual_calisthenics_reps_vs_weighted_standards(self) -> None:
+        """
+        Verify calisthenics lifts expose both bodyweight reps and added-kg weighted standards.
+
+        :return: None
+        """
+        bodymass_log = {"2026-09-24": {"mass": 86.45}}  # 90kg weight class
+        # Reps mode (default): Elite pull-ups = 30 reps
+        reps_elite = get_exercise_standard(
+            "pull-ups", "2026-11-10", bodymass_log, level="Elite", sex="male", weighted=False
+        )
+        self.assertEqual(reps_elite, 30)
+
+        # Weighted mode (+kg belt): Intermediate pull-ups = 35 kg, Elite = 79 kg
+        kg_int = get_exercise_standard(
+            "pull-ups", "2026-11-10", bodymass_log, level="Intermediate", sex="male", weighted=True
+        )
+        kg_elite = get_exercise_standard(
+            "pull-ups", "2026-11-10", bodymass_log, level="Elite", sex="male", weighted=True
+        )
+        self.assertEqual(kg_int, 35)
+        self.assertEqual(kg_elite, 79)
+
+        # Dips weighted mode (+kg belt): Novice = 30 kg, Intermediate = 57 kg at 90 kg class
+        dips_nov = get_exercise_standard(
+            "dips", "2026-11-10", bodymass_log, level="Novice", sex="male", weighted=True
+        )
+        self.assertEqual(dips_nov, 30)
+
 
 if __name__ == "__main__":
     unittest.main()

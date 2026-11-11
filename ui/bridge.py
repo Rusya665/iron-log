@@ -415,15 +415,16 @@ class WebViewBridgeApi:
                     reps_part = "-".join(str(r) for r in log.reps)
 
                 # Format mass
-                max_lift = max(log.mass) if log.mass else 0
-                if log.mass and max(log.mass) > 0:
+                is_weighted = bool(log.mass and max(log.mass) > 0)
+                if is_weighted:
+                    max_lift = max(log.mass)
                     if len(set(log.mass)) == 1:
                         mass_part = f" @ {log.mass[0]}kg"
                     else:
                         mass_part = f" @ {min(log.mass)}-{max(log.mass)}kg"
                 else:
                     mass_part = " (BW)"
-                    max_lift = mass if mass else 0
+                    max_lift = max(log.reps) if log.reps else 0
 
                 summary = f"{reps_part}{mass_part}"
                 exs.append({
@@ -431,6 +432,7 @@ class WebViewBridgeApi:
                     "name": display_name,
                     "summary": summary,
                     "max_lift": max_lift,
+                    "is_weighted": is_weighted,
                 })
 
             recent_sessions.append({
@@ -514,24 +516,32 @@ class WebViewBridgeApi:
         import math
         return int(math.ceil(round(mass, 2) / 5.0) * 5)
 
-    def get_exercise_standards_table(self, exercise_id: str, mass: Optional[float] = None) -> Dict[str, Any]:
+    def get_exercise_standards_table(
+        self, exercise_id: str, mass: Optional[float] = None, weighted: bool = False
+    ) -> Dict[str, Any]:
         """
         Fetch full standards table for an exercise and compute the user's target weight tier.
 
         :param exercise_id: Canonical slug or display name of the exercise.
         :param mass: Optional explicit session mass in kg.
+        :param weighted: Whether to prefer added-weight (1RM kg) standards for dual calisthenics lifts.
         :return: Dictionary containing exercise ID, display name, target bodyweight, and standards dict.
         """
         p = self.manager.get_active_profile()
         sex = getattr(p, "sex", "male") if p else "male"
         resolved_mass = self._resolve_user_mass(mass)
-        standards = get_tiered_standards(exercise_id, sex, None)
+        standards = get_tiered_standards(exercise_id, sex, None, weighted=weighted)
         target_bm = self._calculate_target_bm(resolved_mass)
-        name = EXERCISE_STANDARDS.get(exercise_id, {}).get("name", exercise_id)
+        info = EXERCISE_STANDARDS.get(exercise_id, {})
+        name = info.get("name", exercise_id)
+        is_reps = (info.get("unit") == "reps" and not weighted) or (
+            info.get("unit") == "reps" and weighted and f"{sex.lower()}_weighted" not in info
+        )
         return {
             "exercise_id": exercise_id,
             "name": name,
             "target_bm": target_bm,
+            "unit": "reps" if is_reps else "kg",
             "standards": standards or {},
         }
 
@@ -951,18 +961,35 @@ class WebViewBridgeApi:
             if q and (q not in name.lower() and q not in slug.lower()):
                 continue
 
-            standards = get_tiered_standards(slug, sex, resolved_mass)
+            has_weighted = f"{sex.lower()}_weighted" in info
+            is_reps = info.get("unit") == "reps"
+
+            standards = get_tiered_standards(slug, sex, resolved_mass, weighted=False)
             levels = standards.get(target_bm, {}) if (standards and target_bm) else {}
+            unit_tag = " (Reps)" if is_reps else ""
 
             results.append({
                 "slug": slug,
-                "name": name,
+                "name": f"{name}{unit_tag}",
                 "beg": levels.get("Beginner", "-"),
                 "nov": levels.get("Novice", "-"),
                 "int": levels.get("Intermediate", "-"),
                 "adv": levels.get("Advanced", "-"),
                 "eli": levels.get("Elite", "-"),
             })
+
+            if has_weighted:
+                w_standards = get_tiered_standards(slug, sex, resolved_mass, weighted=True)
+                w_levels = w_standards.get(target_bm, {}) if (w_standards and target_bm) else {}
+                results.append({
+                    "slug": slug,
+                    "name": f"{name} (Weighted +kg)",
+                    "beg": w_levels.get("Beginner", "-"),
+                    "nov": w_levels.get("Novice", "-"),
+                    "int": w_levels.get("Intermediate", "-"),
+                    "adv": w_levels.get("Advanced", "-"),
+                    "eli": w_levels.get("Elite", "-"),
+                })
         return results
 
     def copy_clipboard(self, text: str) -> None:

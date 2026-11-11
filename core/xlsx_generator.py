@@ -424,8 +424,17 @@ class TrainingLogProcessor:
         # Pre-compute each exercise's final achieved milestone level across ALL dates.
         # This allows the background to retroactively fill the whole chart with the
         # highest level ever achieved, rather than only showing it from the date achieved.
+        is_weighted_ex = {
+            ex.id: any(
+                day_data.get(ex.id) and day_data[ex.id].mass and max(day_data[ex.id].mass) > 0
+                for day_data in data.values()
+            )
+            for ex in self.exercises
+        }
+
         final_level = {ex.id: -1 for ex in self.exercises}
         for ex in self.exercises:
+            weighted_mode = is_weighted_ex[ex.id]
             for date_str_pre, day_data_pre in data.items():
                 if ex.id not in day_data_pre:
                     continue
@@ -433,33 +442,12 @@ class TrainingLogProcessor:
                 if not (log_pre.reps and log_pre.mass and sum(log_pre.reps) > 0):
                     continue
                 is_bw_pre = max(log_pre.mass) == 0
+                if weighted_mode and is_bw_pre:
+                    continue
                 cap_pre = max(log_pre.reps) if is_bw_pre else calc_brzycki(log_pre)
-                std_beg = get_exercise_standard(
-                    ex.id, date_str_pre, self.bodymass_log, "Beginner", sex=sex
+                _, lv = self._resolve_strength_tier(
+                    ex.id, date_str_pre, cap_pre, sex, weighted=weighted_mode
                 )
-                std_nov = get_exercise_standard(
-                    ex.id, date_str_pre, self.bodymass_log, "Novice", sex=sex
-                )
-                std_int = get_exercise_standard(
-                    ex.id, date_str_pre, self.bodymass_log, "Intermediate", sex=sex
-                )
-                std_adv = get_exercise_standard(
-                    ex.id, date_str_pre, self.bodymass_log, "Advanced", sex=sex
-                )
-                std_eli = get_exercise_standard(
-                    ex.id, date_str_pre, self.bodymass_log, "Elite", sex=sex
-                )
-                lv = -1
-                if std_eli > 0 and cap_pre >= std_eli:
-                    lv = 4
-                elif std_adv > 0 and cap_pre >= std_adv:
-                    lv = 3
-                elif std_int > 0 and cap_pre >= std_int:
-                    lv = 2
-                elif std_nov > 0 and cap_pre >= std_nov:
-                    lv = 1
-                elif std_beg > 0 and cap_pre >= std_beg:
-                    lv = 0
                 if lv > final_level[ex.id]:
                     final_level[ex.id] = lv
 
@@ -552,15 +540,28 @@ class TrainingLogProcessor:
                                 "Adv": "Advanced",
                                 "Eli": "Elite",
                             }
-                            val = get_exercise_standard(
+                            weighted_mode = is_weighted_ex[ex.id]
+                            eli_val = get_exercise_standard(
                                 ex.id,
                                 date_str,
                                 self.bodymass_log,
-                                map_std.get(level_str),
+                                "Elite",
                                 sex=sex,
+                                weighted=weighted_mode,
                             )
-                            if val == 0:
+                            if eli_val == 0:
                                 val = None
+                            else:
+                                val = get_exercise_standard(
+                                    ex.id,
+                                    date_str,
+                                    self.bodymass_log,
+                                    map_std.get(level_str),
+                                    sex=sex,
+                                    weighted=weighted_mode,
+                                )
+                                if val <= 0 and level_str != "Beg":
+                                    val = None
                     elif has_data:
                         val = m.func(raw_input)
 
@@ -670,6 +671,29 @@ class TrainingLogProcessor:
             td_row += 1
         self.td_total_rows = td_row - 1  # total rows written in training-day table
 
+    def _resolve_strength_tier(
+        self,
+        ex_id: str,
+        date_str: str,
+        score: float,
+        sex: Optional[str],
+        weighted: bool,
+    ) -> Tuple[str, int]:
+        """Resolve highest achieved tier label and 0-based index (or ('Untrained', -1))."""
+        eli_val = get_exercise_standard(
+            ex_id, date_str, self.bodymass_log, "Elite", sex=sex, weighted=weighted
+        )
+        if eli_val == 0:
+            return "Untrained", -1
+
+        for idx, (lvl_name, _, _) in reversed(list(enumerate(self.levels))):
+            std_val = get_exercise_standard(
+                ex_id, date_str, self.bodymass_log, lvl_name, sex=sex, weighted=weighted
+            )
+            if (std_val > 0 or idx == 0) and score >= std_val:
+                return lvl_name, idx
+        return "Untrained", -1
+
     def write_personal_records(self) -> None:
         """
         Write Training PRs and PR-session bests side-by-side into Personal_Records worksheet.
@@ -724,19 +748,13 @@ class TrainingLogProcessor:
                 if ex.id not in prs_dict:
                     continue
                 max_mass, pr_date = prs_dict[ex.id]
-                levels_to_check = [lvl[0] for lvl in reversed(self.levels)]
-                reached_level = "Untrained"
-                for level in levels_to_check:
-                    std_val = get_exercise_standard(
-                        ex.id,
-                        pr_date,
-                        self.bodymass_log,
-                        level,
-                        sex=self.user_profile.get("sex"),
-                    )
-                    if std_val > 0 and max_mass >= std_val:
-                        reached_level = level
-                        break
+                reached_level, _ = self._resolve_strength_tier(
+                    ex.id,
+                    pr_date,
+                    max_mass,
+                    self.user_profile.get("sex"),
+                    weighted=max_mass > 0,
+                )
                 ws.write(row, col_offset, ex.display_name)
                 ws.write(row, col_offset + 1, max_mass)
                 ws.write(row, col_offset + 2, pr_date)
@@ -1032,6 +1050,14 @@ class TrainingLogProcessor:
         chart_pos_y = max(cursor_left, cursor_right) + 5
 
         for ex in self.exercises:
+            is_bodyweight = True
+            for d_data in self.user_data.values():
+                if ex.id in d_data:
+                    log_entry = d_data[ex.id]
+                    if log_entry.mass and max(log_entry.mass) > 0:
+                        is_bodyweight = False
+                        break
+
             # We must calculate Y-axis max early so we can strictly bind the primary axis.
             all_mass_vals = []
             col_mass = self.col_map[ex.id]["Avg Mass"]
@@ -1071,7 +1097,12 @@ class TrainingLogProcessor:
                 if last_date:
                     for lvl_name in std_levels_ordered:
                         std_val = get_exercise_standard(
-                            ex.id, last_date, self.bodymass_log, lvl_name, sex=sex
+                            ex.id,
+                            last_date,
+                            self.bodymass_log,
+                            lvl_name,
+                            sex=sex,
+                            weighted=not is_bodyweight,
                         )
                         if std_val and std_val > max_mass:
                             # Show the first tier above max performance with 10% margin
@@ -1082,14 +1113,6 @@ class TrainingLogProcessor:
             else:
                 y_min = 0
                 y_max = 10
-
-            is_bodyweight = True
-            for d_data in self.user_data.values():
-                if ex.id in d_data:
-                    log_entry = d_data[ex.id]
-                    if log_entry.mass and max(log_entry.mass) > 0:
-                        is_bodyweight = False
-                        break
 
             series_2_name = "Max Reps" if is_bodyweight else "Est 1RM"
             y_axis_name = "Max Reps" if is_bodyweight else "Mass (kg)"

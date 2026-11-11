@@ -160,6 +160,101 @@ def _load_sessions_module(sessions_file_path: str) -> Any:
         raise
 
 
+def _extract_user_data_day_items(
+    day_data: Dict[str, Any],
+    var_to_id: Dict[str, str],
+    id_to_name: Dict[str, str],
+) -> List[Tuple[str, str, str, List[float], List[float]]]:
+    """Extract ordered (norm_key, var_name, display_name, reps, mass) tuples from a USER_DATA session."""
+    from core.models import Log
+
+    items: List[Tuple[str, str, str, List[float], List[float]]] = []
+    for key, val in day_data.items():
+        if not isinstance(val, Log):
+            continue
+        norm_key = key.lower().replace("-", "_")
+        matches = [
+            v for v, eid in var_to_id.items()
+            if eid.lower().replace("-", "_") == norm_key
+        ]
+        var_name = norm_key
+        if matches:
+            lower_matches = [m for m in matches if m.islower()]
+            var_name = lower_matches[0] if lower_matches else matches[0]
+
+        display = (
+            id_to_name.get(key)
+            or id_to_name.get(key.lower())
+            or id_to_name.get(key.lower().replace("_", "-"))
+            or var_name.replace("_", " ").title()
+        )
+        items.append((norm_key, var_name, display, list(val.reps), list(val.mass)))
+    return items
+
+
+def _resolve_alternating_items(
+    split_history: List[List[Tuple[str, str, str, List[float], List[float]]]]
+) -> List[Tuple[str, str, str, List[float], List[float]]]:
+    """
+    Detect alternating Week A / Week B exercises in the same workout slot and
+    rotate to the alternate exercise using its last logged sets/reps/mass.
+
+    :param split_history: Non-empty list of compatible sessions ordered newest-first.
+    :return: Ordered exercise tuples for the upcoming session.
+    """
+    if not split_history:
+        return []
+    latest = split_history[0]
+    if len(split_history) < 2:
+        return latest
+
+    prev = split_history[1]
+    latest_keys = {item[0] for item in latest}
+    prev_keys = {item[0] for item in prev}
+    only_latest = latest_keys - prev_keys
+    only_prev = prev_keys - latest_keys
+    if not only_latest or not only_prev:
+        return latest
+
+    pos_latest = {
+        item[0]: idx / max(1, len(latest) - 1) if len(latest) > 1 else 0.5
+        for idx, item in enumerate(latest)
+    }
+    pos_prev = {
+        item[0]: idx / max(1, len(prev) - 1) if len(prev) > 1 else 0.5
+        for idx, item in enumerate(prev)
+    }
+    prev_by_key = {item[0]: item for item in prev}
+    session_key_sets = [{item[0] for item in s} for s in split_history]
+
+    # Build candidate pairs (dist, k0, k1) where k0 and k1 never co-occur in this split
+    # Require k1 to account for >= 30% of the slot appearances so a true A/B rotation
+    # (which is >= 33.3% from week 2 onward) swaps cleanly, a 1-off sub recovers back to
+    # the primary, and a rare 1-off sub doesn't hijack an established primary.
+    candidates: List[Tuple[float, str, str]] = []
+    for k0 in only_latest:
+        c0 = sum(1 for ks in session_key_sets if k0 in ks)
+        for k1 in only_prev:
+            c1 = sum(1 for ks in session_key_sets if k1 in ks)
+            if (c1 / (c0 + c1)) < 0.30:
+                continue
+            co_occur = sum(1 for ks in session_key_sets if k0 in ks and k1 in ks)
+            if co_occur == 0:
+                dist = abs(pos_latest[k0] - pos_prev[k1])
+                if dist < 0.35:
+                    candidates.append((dist, k0, k1))
+
+    candidates.sort(key=lambda t: t[0])
+    swap_map: Dict[str, Tuple[str, str, str, List[float], List[float]]] = {}
+    used_prev: Set[str] = set()
+    for _, k0, k1 in candidates:
+        if k0 not in swap_map and k1 not in used_prev:
+            swap_map[k0] = prev_by_key[k1]
+            used_prev.add(k1)
+
+    return [swap_map.get(item[0], item) for item in latest]
+
+
 def build_planned_sessions(
     sessions_file_path: str, day_numbers: List[int]
 ) -> List[PlannedSession]:
@@ -195,21 +290,52 @@ def build_planned_sessions(
         ):
             var_to_id[attr] = val  # e.g. "squat" → "squat" (the slug)
 
-    from core.models import Log
-
-    # Find the most recent session for each requested day number
+    # Collect per-day history within the current split (stopping at deload or split boundary)
+    deload_dates = get_deload_dates(sessions_file_path)
     sorted_dates = sorted(sess_mod.USER_DATA.keys(), reverse=True)
-    baseline: dict[int, dict] = {}  # day_number → day_data dict
+    day_histories: dict[int, List[List[Tuple[str, str, str, List[float], List[float]]]]] = {}
+    day_ref_sets: dict[int, Set[str]] = {}
+    stopped_days: Set[int] = set()
 
     for date_str in sorted_dates:
         day_data = sess_mod.USER_DATA[date_str]
         day_obj = day_data.get("day")
+        is_deload = date_str in deload_dates
+
+        if is_deload:
+            # Once a day has a newer non-deload session, stop scanning before older deloads
+            for existing_dn in list(day_histories.keys()):
+                stopped_days.add(existing_dn)
+
         if not isinstance(day_obj, int):
-            # not a numbered training day — skip
             continue
         dn = day_obj
-        if dn in day_numbers and dn not in baseline:
-            baseline[dn] = day_data
+        if dn not in day_numbers or dn in stopped_days:
+            continue
+
+        items = _extract_user_data_day_items(day_data, var_to_id, id_to_name)
+        if not items:
+            continue
+        ex_set = {it[0] for it in items}
+
+        if dn not in day_histories:
+            day_histories[dn] = [items]
+            day_ref_sets[dn] = ex_set
+            if is_deload:
+                stopped_days.add(dn)
+        else:
+            ref_set = day_ref_sets[dn]
+            union_len = len(ref_set.union(ex_set))
+            similarity = (len(ref_set.intersection(ex_set)) / union_len) if union_len else 0.0
+            if similarity < 0.50:
+                stopped_days.add(dn)
+            else:
+                day_histories[dn].append(items)
+
+    baseline: dict[int, Any] = {
+        dn: _resolve_alternating_items(hist)
+        for dn, hist in day_histories.items()
+    }
 
     if len(baseline) < len(day_numbers):
         # Only match uncommented block openers — commented-out sessions are
@@ -258,9 +384,9 @@ def build_planned_sessions(
             day_number=dn,
             date_str=suggested_dates[idx],
         )
-        day_data = baseline.get(dn, {})
+        day_data = baseline.get(dn, [])
 
-        if "_raw_lines" in day_data:
+        if isinstance(day_data, dict) and "_raw_lines" in day_data:
             # Legacy parsing path: parse raw "    var: Log([r], [m])," strings
             log_pat = re.compile(
                 r"\s*(\w+)\s*:\s*Log\(\s*\[([^\]]+)\]\s*,\s*\[([^\]]+)\]\s*\)"
@@ -283,26 +409,8 @@ def build_planned_sessions(
                     )
                 )
         else:
-            for key, val in day_data.items():
-                if not isinstance(val, Log):
-                    continue
-                norm_key = key.lower().replace("-", "_")
-                matches = [
-                    v for v, eid in var_to_id.items()
-                    if eid.lower().replace("-", "_") == norm_key
-                ]
-                var_name = norm_key
-                if matches:
-                    lower_matches = [m for m in matches if m.islower()]
-                    var_name = lower_matches[0] if lower_matches else matches[0]
-
-                display = (
-                    id_to_name.get(key)
-                    or id_to_name.get(key.lower())
-                    or id_to_name.get(key.lower().replace("_", "-"))
-                    or var_name.replace("_", " ").title()
-                )
-                progression = _suggest_progression(val.reps, val.mass)
+            for _, var_name, display, reps_list, mass_list in day_data:
+                progression = _suggest_progression(reps_list, mass_list)
                 session.exercises.append(
                     PlannedExercise(
                         var_name=var_name,
@@ -427,26 +535,22 @@ def build_pre_deload_baseline(
         else:
             line_idx += 1
 
-    # Walk newest-first
+    # Walk newest-first, collecting compatible non-deload history per day
     all_blocks_rev = list(reversed(all_blocks))
+    day_histories: dict[int, List[List[Tuple[str, str, str, List[float], List[float]]]]] = {}
+    day_ref_sets: dict[int, Set[str]] = {}
+    stopped_days: Set[int] = set()
 
-    # For each requested day, find the most recent NON-deload block
-    baseline: dict[int, list[str]] = {}
-    for date_str, dn, block_lines in all_blocks_rev:
-        if dn in day_numbers and dn not in baseline:
-            if not _is_deload_block(block_lines):
-                baseline[dn] = block_lines
+    for _, dn, block_lines in all_blocks_rev:
+        if _is_deload_block(block_lines):
+            for existing_dn in list(day_histories.keys()):
+                stopped_days.add(existing_dn)
+            continue
 
-    suggested_dates = _next_date_after(sess_mod.USER_DATA, len(day_numbers))
-    label = "restored" if scale_pct == 100.0 else f"{scale_pct:g}% of pre-deload"
+        if dn not in day_numbers or dn in stopped_days:
+            continue
 
-    planned: List[PlannedSession] = []
-    for idx, dn in enumerate(day_numbers):
-        session = PlannedSession(
-            day_number=dn,
-            date_str=suggested_dates[idx],
-        )
-        block_lines = baseline.get(dn, [])
+        items: List[Tuple[str, str, str, List[float], List[float]]] = []
         for raw_ln in block_lines:
             lm = _LOG_LINE_RE.match(raw_ln)
             if not lm:
@@ -456,16 +560,44 @@ def build_pre_deload_baseline(
                 continue
             reps_list = [float(x.strip()) for x in lm.group(2).split(",")]
             mass_list = [float(x.strip()) for x in lm.group(3).split(",")]
+            ex_id = var_to_id.get(var_name, var_name)
+            display = id_to_name.get(ex_id, var_name.replace("_", " ").title())
+            norm_key = str(ex_id).lower().replace("-", "_")
+            items.append((norm_key, var_name, display, reps_list, mass_list))
 
+        if not items:
+            continue
+        ex_set = {it[0] for it in items}
+
+        if dn not in day_histories:
+            day_histories[dn] = [items]
+            day_ref_sets[dn] = ex_set
+        else:
+            ref_set = day_ref_sets[dn]
+            union_len = len(ref_set.union(ex_set))
+            similarity = (len(ref_set.intersection(ex_set)) / union_len) if union_len else 0.0
+            if similarity < 0.50:
+                stopped_days.add(dn)
+            else:
+                day_histories[dn].append(items)
+
+    suggested_dates = _next_date_after(sess_mod.USER_DATA, len(day_numbers))
+    label = "restored" if scale_pct == 100.0 else f"{scale_pct:g}% of pre-deload"
+    factor = scale_pct / 100.0
+
+    planned: List[PlannedSession] = []
+    for idx, dn in enumerate(day_numbers):
+        session = PlannedSession(
+            day_number=dn,
+            date_str=suggested_dates[idx],
+        )
+        resolved_items = _resolve_alternating_items(day_histories.get(dn, []))
+        for _, var_name, display, reps_list, mass_list in resolved_items:
             # Scale + round to nearest 2.5 kg (keep 0 as 0)
-            factor = scale_pct / 100.0
             scaled_mass = [
                 round(m * factor / 2.5) * 2.5 if m > 0 else 0.0
                 for m in mass_list
             ]
-
-            ex_id = var_to_id.get(var_name, var_name)
-            display = id_to_name.get(ex_id, var_name.replace("_", " ").title())
             prog = _suggest_progression(reps_list, scaled_mass)
 
             session.exercises.append(

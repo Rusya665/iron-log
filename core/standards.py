@@ -3,22 +3,54 @@ import re
 from typing import Any, Dict, Optional
 
 
+def _find_exercise_slug(exercise_id: str) -> Optional[str]:
+    """Resolve an exercise ID or display name to its canonical EXERCISE_STANDARDS key."""
+    if not exercise_id:
+        return None
+    target_norm = exercise_id.lower().strip().replace(" ", "-")
+    if target_norm in EXERCISE_STANDARDS:
+        return target_norm
+    for slug, info in EXERCISE_STANDARDS.items():
+        if info.get("name", "").lower().strip().replace(" ", "-") == target_norm:
+            return slug
+    return None
+
+
+def _resolve_gender_table(
+    slug: str, sex: str, weighted: bool = False
+) -> Optional[Dict[int, Dict[str, int]]]:
+    """Resolve bodyweight/tier table for an exercise slug, sex, and rep-vs-weighted mode."""
+    entry = EXERCISE_STANDARDS.get(slug)
+    if not entry:
+        return None
+    sex_l = sex.lower()
+    if weighted:
+        weighted_key = f"{sex_l}_weighted"
+        if weighted_key in entry:
+            return entry[weighted_key]
+        if entry.get("unit") == "reps":
+            return None
+    return entry.get(sex_l)
+
+
 def get_exercise_standard(
     exercise_id: str,
     target_date_str: str,
     bodymass_log: Dict[str, Any],
     level: str = "Intermediate",
     sex: Optional[str] = None,
+    weighted: bool = False,
 ) -> int:
     """
-    Retrieve standard lifted mass target for exercise and date from standards database.
+    Retrieve standard lifted mass (or rep) target for exercise and date from standards database.
 
     :param exercise_id: Canonical exercise slug or display name.
     :param target_date_str: Date string formatted as YYYY-MM-DD to resolve closest body mass.
     :param bodymass_log: Dictionary mapping date strings to body mass records.
     :param level: Strength tier ("Beginner", "Novice", "Intermediate", "Advanced", "Elite").
     :param sex: Biological sex ("male" or "female").
-    :return: Target lifted weight in kilograms, or 0 if unmapped.
+    :param weighted: If True, prefer added-weight (1RM kg) standards for dual calisthenics lifts.
+    :return: Target lifted weight (kg) or reps, or 0 if unmapped.
     """
     if sex is None:
         try:
@@ -69,21 +101,11 @@ def get_exercise_standard(
     rounded_bm = int(math.ceil(round(current_bm, 2) / 5.0) * 5)
     rounded_bm = max(50, min(rounded_bm, 140))
 
-    target_norm = exercise_id.lower().strip().replace(" ", "-")
-    found_slug = None
-
-    if target_norm in EXERCISE_STANDARDS:
-        found_slug = target_norm
-    else:
-        for slug, info in EXERCISE_STANDARDS.items():
-            if info.get("name", "").lower().strip().replace(" ", "-") == target_norm:
-                found_slug = slug
-                break
-
+    found_slug = _find_exercise_slug(exercise_id)
     if not found_slug:
         return 0
 
-    gender_table = EXERCISE_STANDARDS[found_slug].get(sex.lower())
+    gender_table = _resolve_gender_table(found_slug, sex, weighted=weighted)
     if not gender_table:
         return 0
 
@@ -99,6 +121,7 @@ def get_tiered_standards(
     exercise_id: str,
     sex: str,
     body_mass: Optional[float] = None,
+    weighted: bool = False,
 ) -> Optional[Dict[int, Dict[str, int]]]:
     """
     Return dictionary of strength standards across bodyweight tiers for an exercise and sex.
@@ -106,26 +129,14 @@ def get_tiered_standards(
     :param exercise_id: Canonical exercise slug or display name.
     :param sex: Biological sex ("male" or "female").
     :param body_mass: Optional body mass in kg to return 3 adjacent tiers around user weight class.
-    :return: Dictionary mapping bodyweight tiers (kg) to tier level target weights, or None.
+    :param weighted: If True, prefer added-weight (1RM kg) standards for dual calisthenics lifts.
+    :return: Dictionary mapping bodyweight tiers (kg) to tier level target weights/reps, or None.
     """
-    if not exercise_id:
-        return None
-
-    target_norm = exercise_id.lower().strip().replace(" ", "-")
-    found_slug = None
-
-    if target_norm in EXERCISE_STANDARDS:
-        found_slug = target_norm
-    else:
-        for slug, info in EXERCISE_STANDARDS.items():
-            if info.get("name", "").lower().strip().replace(" ", "-") == target_norm:
-                found_slug = slug
-                break
-
+    found_slug = _find_exercise_slug(exercise_id)
     if not found_slug:
         return None
 
-    gender_table = EXERCISE_STANDARDS[found_slug].get(sex.lower())
+    gender_table = _resolve_gender_table(found_slug, sex, weighted=weighted)
     if not gender_table:
         return None
 
@@ -10770,6 +10781,7 @@ EXERCISE_STANDARDS = {
     },
     "chin-ups": {
         "name": "Chin Ups",
+        "unit": "reps",
         "male": {
             50: {
                 "Beginner": 1,
@@ -11024,6 +11036,262 @@ EXERCISE_STANDARDS = {
                 "Intermediate": 3,
                 "Advanced": 7,
                 "Elite": 10,
+            },
+        },
+        "male_weighted": {
+            50: {
+                "Beginner": -4,
+                "Novice": 8,
+                "Intermediate": 23,
+                "Advanced": 39,
+                "Elite": 56,
+            },
+            55: {
+                "Beginner": -3,
+                "Novice": 10,
+                "Intermediate": 26,
+                "Advanced": 43,
+                "Elite": 60,
+            },
+            60: {
+                "Beginner": -2,
+                "Novice": 12,
+                "Intermediate": 28,
+                "Advanced": 46,
+                "Elite": 64,
+            },
+            65: {
+                "Beginner": -1,
+                "Novice": 13,
+                "Intermediate": 30,
+                "Advanced": 48,
+                "Elite": 67,
+            },
+            70: {
+                "Beginner": -1,
+                "Novice": 14,
+                "Intermediate": 32,
+                "Advanced": 50,
+                "Elite": 70,
+            },
+            75: {
+                "Beginner": 0,
+                "Novice": 15,
+                "Intermediate": 33,
+                "Advanced": 52,
+                "Elite": 73,
+            },
+            80: {
+                "Beginner": 0,
+                "Novice": 16,
+                "Intermediate": 34,
+                "Advanced": 54,
+                "Elite": 75,
+            },
+            85: {
+                "Beginner": 0,
+                "Novice": 16,
+                "Intermediate": 35,
+                "Advanced": 56,
+                "Elite": 77,
+            },
+            90: {
+                "Beginner": 0,
+                "Novice": 17,
+                "Intermediate": 36,
+                "Advanced": 57,
+                "Elite": 79,
+            },
+            95: {
+                "Beginner": -1,
+                "Novice": 17,
+                "Intermediate": 37,
+                "Advanced": 58,
+                "Elite": 80,
+            },
+            100: {
+                "Beginner": -1,
+                "Novice": 17,
+                "Intermediate": 37,
+                "Advanced": 59,
+                "Elite": 81,
+            },
+            105: {
+                "Beginner": -2,
+                "Novice": 17,
+                "Intermediate": 37,
+                "Advanced": 60,
+                "Elite": 82,
+            },
+            110: {
+                "Beginner": -2,
+                "Novice": 16,
+                "Intermediate": 37,
+                "Advanced": 60,
+                "Elite": 83,
+            },
+            115: {
+                "Beginner": -3,
+                "Novice": 16,
+                "Intermediate": 37,
+                "Advanced": 60,
+                "Elite": 84,
+            },
+            120: {
+                "Beginner": -4,
+                "Novice": 15,
+                "Intermediate": 37,
+                "Advanced": 61,
+                "Elite": 84,
+            },
+            125: {
+                "Beginner": -5,
+                "Novice": 15,
+                "Intermediate": 37,
+                "Advanced": 61,
+                "Elite": 85,
+            },
+            130: {
+                "Beginner": -6,
+                "Novice": 14,
+                "Intermediate": 36,
+                "Advanced": 60,
+                "Elite": 85,
+            },
+            135: {
+                "Beginner": -7,
+                "Novice": 13,
+                "Intermediate": 36,
+                "Advanced": 60,
+                "Elite": 85,
+            },
+            140: {
+                "Beginner": -8,
+                "Novice": 12,
+                "Intermediate": 35,
+                "Advanced": 60,
+                "Elite": 85,
+            },
+        },
+        "female_weighted": {
+            40: {
+                "Beginner": -10,
+                "Novice": -3,
+                "Intermediate": 6,
+                "Advanced": 15,
+                "Elite": 25,
+            },
+            45: {
+                "Beginner": -10,
+                "Novice": -2,
+                "Intermediate": 7,
+                "Advanced": 17,
+                "Elite": 27,
+            },
+            50: {
+                "Beginner": -10,
+                "Novice": -1,
+                "Intermediate": 8,
+                "Advanced": 19,
+                "Elite": 30,
+            },
+            55: {
+                "Beginner": -10,
+                "Novice": -1,
+                "Intermediate": 9,
+                "Advanced": 20,
+                "Elite": 32,
+            },
+            60: {
+                "Beginner": -10,
+                "Novice": -1,
+                "Intermediate": 10,
+                "Advanced": 21,
+                "Elite": 33,
+            },
+            65: {
+                "Beginner": -10,
+                "Novice": -1,
+                "Intermediate": 10,
+                "Advanced": 22,
+                "Elite": 34,
+            },
+            70: {
+                "Beginner": -11,
+                "Novice": -1,
+                "Intermediate": 10,
+                "Advanced": 23,
+                "Elite": 35,
+            },
+            75: {
+                "Beginner": -12,
+                "Novice": -1,
+                "Intermediate": 10,
+                "Advanced": 23,
+                "Elite": 36,
+            },
+            80: {
+                "Beginner": -13,
+                "Novice": -2,
+                "Intermediate": 10,
+                "Advanced": 23,
+                "Elite": 36,
+            },
+            85: {
+                "Beginner": -14,
+                "Novice": -3,
+                "Intermediate": 10,
+                "Advanced": 23,
+                "Elite": 36,
+            },
+            90: {
+                "Beginner": -15,
+                "Novice": -3,
+                "Intermediate": 9,
+                "Advanced": 23,
+                "Elite": 36,
+            },
+            95: {
+                "Beginner": -16,
+                "Novice": -4,
+                "Intermediate": 9,
+                "Advanced": 22,
+                "Elite": 36,
+            },
+            100: {
+                "Beginner": -17,
+                "Novice": -6,
+                "Intermediate": 8,
+                "Advanced": 22,
+                "Elite": 36,
+            },
+            105: {
+                "Beginner": -19,
+                "Novice": -7,
+                "Intermediate": 7,
+                "Advanced": 21,
+                "Elite": 35,
+            },
+            110: {
+                "Beginner": -20,
+                "Novice": -8,
+                "Intermediate": 6,
+                "Advanced": 20,
+                "Elite": 35,
+            },
+            115: {
+                "Beginner": -22,
+                "Novice": -10,
+                "Intermediate": 4,
+                "Advanced": 19,
+                "Elite": 34,
+            },
+            120: {
+                "Beginner": -24,
+                "Novice": -11,
+                "Intermediate": 3,
+                "Advanced": 18,
+                "Elite": 33,
             },
         },
     },
@@ -16468,6 +16736,7 @@ EXERCISE_STANDARDS = {
     },
     "dips": {
         "name": "Dips",
+        "unit": "reps",
         "male": {
             50: {
                 "Beginner": 1,
@@ -16722,6 +16991,262 @@ EXERCISE_STANDARDS = {
                 "Intermediate": 6,
                 "Advanced": 12,
                 "Elite": 20,
+            },
+        },
+        "male_weighted": {
+            50: {
+                "Beginner": -5,
+                "Novice": 11,
+                "Intermediate": 31,
+                "Advanced": 54,
+                "Elite": 78,
+            },
+            55: {
+                "Beginner": -3,
+                "Novice": 14,
+                "Intermediate": 35,
+                "Advanced": 59,
+                "Elite": 85,
+            },
+            60: {
+                "Beginner": -1,
+                "Novice": 17,
+                "Intermediate": 39,
+                "Advanced": 64,
+                "Elite": 91,
+            },
+            65: {
+                "Beginner": 0,
+                "Novice": 20,
+                "Intermediate": 43,
+                "Advanced": 69,
+                "Elite": 96,
+            },
+            70: {
+                "Beginner": 2,
+                "Novice": 22,
+                "Intermediate": 46,
+                "Advanced": 73,
+                "Elite": 101,
+            },
+            75: {
+                "Beginner": 3,
+                "Novice": 25,
+                "Intermediate": 49,
+                "Advanced": 77,
+                "Elite": 106,
+            },
+            80: {
+                "Beginner": 5,
+                "Novice": 26,
+                "Intermediate": 52,
+                "Advanced": 81,
+                "Elite": 111,
+            },
+            85: {
+                "Beginner": 6,
+                "Novice": 28,
+                "Intermediate": 55,
+                "Advanced": 84,
+                "Elite": 114,
+            },
+            90: {
+                "Beginner": 6,
+                "Novice": 30,
+                "Intermediate": 57,
+                "Advanced": 87,
+                "Elite": 118,
+            },
+            95: {
+                "Beginner": 7,
+                "Novice": 31,
+                "Intermediate": 59,
+                "Advanced": 90,
+                "Elite": 122,
+            },
+            100: {
+                "Beginner": 8,
+                "Novice": 32,
+                "Intermediate": 61,
+                "Advanced": 92,
+                "Elite": 125,
+            },
+            105: {
+                "Beginner": 8,
+                "Novice": 33,
+                "Intermediate": 62,
+                "Advanced": 94,
+                "Elite": 127,
+            },
+            110: {
+                "Beginner": 8,
+                "Novice": 34,
+                "Intermediate": 64,
+                "Advanced": 96,
+                "Elite": 130,
+            },
+            115: {
+                "Beginner": 9,
+                "Novice": 35,
+                "Intermediate": 65,
+                "Advanced": 98,
+                "Elite": 132,
+            },
+            120: {
+                "Beginner": 9,
+                "Novice": 35,
+                "Intermediate": 66,
+                "Advanced": 100,
+                "Elite": 135,
+            },
+            125: {
+                "Beginner": 9,
+                "Novice": 36,
+                "Intermediate": 67,
+                "Advanced": 101,
+                "Elite": 136,
+            },
+            130: {
+                "Beginner": 8,
+                "Novice": 36,
+                "Intermediate": 68,
+                "Advanced": 103,
+                "Elite": 138,
+            },
+            135: {
+                "Beginner": 8,
+                "Novice": 36,
+                "Intermediate": 69,
+                "Advanced": 104,
+                "Elite": 140,
+            },
+            140: {
+                "Beginner": 8,
+                "Novice": 37,
+                "Intermediate": 69,
+                "Advanced": 105,
+                "Elite": 141,
+            },
+        },
+        "female_weighted": {
+            40: {
+                "Beginner": -15,
+                "Novice": -4,
+                "Intermediate": 10,
+                "Advanced": 26,
+                "Elite": 44,
+            },
+            45: {
+                "Beginner": -15,
+                "Novice": -3,
+                "Intermediate": 12,
+                "Advanced": 29,
+                "Elite": 48,
+            },
+            50: {
+                "Beginner": -15,
+                "Novice": -2,
+                "Intermediate": 14,
+                "Advanced": 32,
+                "Elite": 52,
+            },
+            55: {
+                "Beginner": -15,
+                "Novice": -1,
+                "Intermediate": 16,
+                "Advanced": 35,
+                "Elite": 55,
+            },
+            60: {
+                "Beginner": -15,
+                "Novice": 0,
+                "Intermediate": 17,
+                "Advanced": 37,
+                "Elite": 58,
+            },
+            65: {
+                "Beginner": -15,
+                "Novice": 0,
+                "Intermediate": 18,
+                "Advanced": 39,
+                "Elite": 60,
+            },
+            70: {
+                "Beginner": -16,
+                "Novice": 0,
+                "Intermediate": 19,
+                "Advanced": 40,
+                "Elite": 62,
+            },
+            75: {
+                "Beginner": -16,
+                "Novice": 0,
+                "Intermediate": 20,
+                "Advanced": 41,
+                "Elite": 64,
+            },
+            80: {
+                "Beginner": -17,
+                "Novice": 0,
+                "Intermediate": 20,
+                "Advanced": 42,
+                "Elite": 66,
+            },
+            85: {
+                "Beginner": -18,
+                "Novice": 0,
+                "Intermediate": 20,
+                "Advanced": 43,
+                "Elite": 67,
+            },
+            90: {
+                "Beginner": -19,
+                "Novice": -1,
+                "Intermediate": 20,
+                "Advanced": 43,
+                "Elite": 68,
+            },
+            95: {
+                "Beginner": -20,
+                "Novice": -2,
+                "Intermediate": 20,
+                "Advanced": 44,
+                "Elite": 69,
+            },
+            100: {
+                "Beginner": -21,
+                "Novice": -2,
+                "Intermediate": 20,
+                "Advanced": 44,
+                "Elite": 69,
+            },
+            105: {
+                "Beginner": -23,
+                "Novice": -3,
+                "Intermediate": 19,
+                "Advanced": 44,
+                "Elite": 70,
+            },
+            110: {
+                "Beginner": -24,
+                "Novice": -4,
+                "Intermediate": 19,
+                "Advanced": 44,
+                "Elite": 70,
+            },
+            115: {
+                "Beginner": -25,
+                "Novice": -5,
+                "Intermediate": 18,
+                "Advanced": 43,
+                "Elite": 70,
+            },
+            120: {
+                "Beginner": -27,
+                "Novice": -7,
+                "Intermediate": 17,
+                "Advanced": 43,
+                "Elite": 70,
             },
         },
     },
@@ -44440,6 +44965,7 @@ EXERCISE_STANDARDS = {
     },
     "muscle-ups": {
         "name": "Muscle Ups",
+        "unit": "reps",
         "male": {
             50: {
                 "Beginner": 1,
@@ -44694,6 +45220,262 @@ EXERCISE_STANDARDS = {
                 "Intermediate": 3,
                 "Advanced": 7,
                 "Elite": 10,
+            },
+        },
+        "male_weighted": {
+            50: {
+                "Beginner": -13,
+                "Novice": -4,
+                "Intermediate": 6,
+                "Advanced": 16,
+                "Elite": 27,
+            },
+            55: {
+                "Beginner": -12,
+                "Novice": -3,
+                "Intermediate": 8,
+                "Advanced": 19,
+                "Elite": 31,
+            },
+            60: {
+                "Beginner": -11,
+                "Novice": -2,
+                "Intermediate": 9,
+                "Advanced": 21,
+                "Elite": 34,
+            },
+            65: {
+                "Beginner": -11,
+                "Novice": -1,
+                "Intermediate": 11,
+                "Advanced": 23,
+                "Elite": 36,
+            },
+            70: {
+                "Beginner": -10,
+                "Novice": 0,
+                "Intermediate": 12,
+                "Advanced": 25,
+                "Elite": 39,
+            },
+            75: {
+                "Beginner": -10,
+                "Novice": 1,
+                "Intermediate": 13,
+                "Advanced": 27,
+                "Elite": 41,
+            },
+            80: {
+                "Beginner": -10,
+                "Novice": 1,
+                "Intermediate": 14,
+                "Advanced": 28,
+                "Elite": 42,
+            },
+            85: {
+                "Beginner": -10,
+                "Novice": 2,
+                "Intermediate": 15,
+                "Advanced": 29,
+                "Elite": 44,
+            },
+            90: {
+                "Beginner": -10,
+                "Novice": 2,
+                "Intermediate": 16,
+                "Advanced": 30,
+                "Elite": 45,
+            },
+            95: {
+                "Beginner": -10,
+                "Novice": 2,
+                "Intermediate": 16,
+                "Advanced": 31,
+                "Elite": 46,
+            },
+            100: {
+                "Beginner": -11,
+                "Novice": 2,
+                "Intermediate": 16,
+                "Advanced": 32,
+                "Elite": 47,
+            },
+            105: {
+                "Beginner": -11,
+                "Novice": 2,
+                "Intermediate": 17,
+                "Advanced": 32,
+                "Elite": 48,
+            },
+            110: {
+                "Beginner": -12,
+                "Novice": 1,
+                "Intermediate": 16,
+                "Advanced": 32,
+                "Elite": 49,
+            },
+            115: {
+                "Beginner": -13,
+                "Novice": 1,
+                "Intermediate": 16,
+                "Advanced": 33,
+                "Elite": 49,
+            },
+            120: {
+                "Beginner": -14,
+                "Novice": 0,
+                "Intermediate": 16,
+                "Advanced": 33,
+                "Elite": 49,
+            },
+            125: {
+                "Beginner": -14,
+                "Novice": 0,
+                "Intermediate": 16,
+                "Advanced": 32,
+                "Elite": 49,
+            },
+            130: {
+                "Beginner": -15,
+                "Novice": -1,
+                "Intermediate": 15,
+                "Advanced": 32,
+                "Elite": 49,
+            },
+            135: {
+                "Beginner": -17,
+                "Novice": -2,
+                "Intermediate": 15,
+                "Advanced": 32,
+                "Elite": 49,
+            },
+            140: {
+                "Beginner": -18,
+                "Novice": -3,
+                "Intermediate": 14,
+                "Advanced": 31,
+                "Elite": 49,
+            },
+        },
+        "female_weighted": {
+            40: {
+                "Beginner": -14,
+                "Novice": -8,
+                "Intermediate": -1,
+                "Advanced": 7,
+                "Elite": 16,
+            },
+            45: {
+                "Beginner": -14,
+                "Novice": -7,
+                "Intermediate": 1,
+                "Advanced": 10,
+                "Elite": 19,
+            },
+            50: {
+                "Beginner": -13,
+                "Novice": -6,
+                "Intermediate": 3,
+                "Advanced": 12,
+                "Elite": 22,
+            },
+            55: {
+                "Beginner": -12,
+                "Novice": -5,
+                "Intermediate": 5,
+                "Advanced": 14,
+                "Elite": 24,
+            },
+            60: {
+                "Beginner": -12,
+                "Novice": -4,
+                "Intermediate": 6,
+                "Advanced": 16,
+                "Elite": 27,
+            },
+            65: {
+                "Beginner": -12,
+                "Novice": -3,
+                "Intermediate": 7,
+                "Advanced": 18,
+                "Elite": 28,
+            },
+            70: {
+                "Beginner": -12,
+                "Novice": -3,
+                "Intermediate": 8,
+                "Advanced": 19,
+                "Elite": 30,
+            },
+            75: {
+                "Beginner": -12,
+                "Novice": -2,
+                "Intermediate": 8,
+                "Advanced": 20,
+                "Elite": 32,
+            },
+            80: {
+                "Beginner": -12,
+                "Novice": -2,
+                "Intermediate": 9,
+                "Advanced": 21,
+                "Elite": 33,
+            },
+            85: {
+                "Beginner": -13,
+                "Novice": -2,
+                "Intermediate": 9,
+                "Advanced": 21,
+                "Elite": 34,
+            },
+            90: {
+                "Beginner": -13,
+                "Novice": -2,
+                "Intermediate": 9,
+                "Advanced": 22,
+                "Elite": 34,
+            },
+            95: {
+                "Beginner": -14,
+                "Novice": -3,
+                "Intermediate": 9,
+                "Advanced": 22,
+                "Elite": 35,
+            },
+            100: {
+                "Beginner": -14,
+                "Novice": -3,
+                "Intermediate": 9,
+                "Advanced": 22,
+                "Elite": 35,
+            },
+            105: {
+                "Beginner": -15,
+                "Novice": -4,
+                "Intermediate": 9,
+                "Advanced": 22,
+                "Elite": 36,
+            },
+            110: {
+                "Beginner": -16,
+                "Novice": -4,
+                "Intermediate": 8,
+                "Advanced": 22,
+                "Elite": 36,
+            },
+            115: {
+                "Beginner": -17,
+                "Novice": -5,
+                "Intermediate": 8,
+                "Advanced": 22,
+                "Elite": 36,
+            },
+            120: {
+                "Beginner": -18,
+                "Novice": -6,
+                "Intermediate": 7,
+                "Advanced": 21,
+                "Elite": 36,
             },
         },
     },
@@ -50915,6 +51697,7 @@ EXERCISE_STANDARDS = {
     },
     "pull-ups": {
         "name": "Pull Ups",
+        "unit": "reps",
         "male": {
             50: {
                 "Beginner": 1,
@@ -51169,6 +51952,262 @@ EXERCISE_STANDARDS = {
                 "Intermediate": 3,
                 "Advanced": 8,
                 "Elite": 12,
+            },
+        },
+        "male_weighted": {
+            50: {
+                "Beginner": -5,
+                "Novice": 7,
+                "Intermediate": 22,
+                "Advanced": 39,
+                "Elite": 56,
+            },
+            55: {
+                "Beginner": -4,
+                "Novice": 9,
+                "Intermediate": 25,
+                "Advanced": 42,
+                "Elite": 61,
+            },
+            60: {
+                "Beginner": -4,
+                "Novice": 11,
+                "Intermediate": 27,
+                "Advanced": 45,
+                "Elite": 64,
+            },
+            65: {
+                "Beginner": -3,
+                "Novice": 12,
+                "Intermediate": 29,
+                "Advanced": 48,
+                "Elite": 68,
+            },
+            70: {
+                "Beginner": -2,
+                "Novice": 13,
+                "Intermediate": 31,
+                "Advanced": 50,
+                "Elite": 71,
+            },
+            75: {
+                "Beginner": -2,
+                "Novice": 14,
+                "Intermediate": 32,
+                "Advanced": 52,
+                "Elite": 73,
+            },
+            80: {
+                "Beginner": -2,
+                "Novice": 14,
+                "Intermediate": 33,
+                "Advanced": 54,
+                "Elite": 75,
+            },
+            85: {
+                "Beginner": -2,
+                "Novice": 15,
+                "Intermediate": 34,
+                "Advanced": 56,
+                "Elite": 77,
+            },
+            90: {
+                "Beginner": -2,
+                "Novice": 15,
+                "Intermediate": 35,
+                "Advanced": 57,
+                "Elite": 79,
+            },
+            95: {
+                "Beginner": -2,
+                "Novice": 15,
+                "Intermediate": 36,
+                "Advanced": 58,
+                "Elite": 81,
+            },
+            100: {
+                "Beginner": -3,
+                "Novice": 15,
+                "Intermediate": 36,
+                "Advanced": 59,
+                "Elite": 82,
+            },
+            105: {
+                "Beginner": -3,
+                "Novice": 15,
+                "Intermediate": 37,
+                "Advanced": 60,
+                "Elite": 83,
+            },
+            110: {
+                "Beginner": -4,
+                "Novice": 15,
+                "Intermediate": 37,
+                "Advanced": 60,
+                "Elite": 84,
+            },
+            115: {
+                "Beginner": -5,
+                "Novice": 15,
+                "Intermediate": 37,
+                "Advanced": 60,
+                "Elite": 85,
+            },
+            120: {
+                "Beginner": -6,
+                "Novice": 14,
+                "Intermediate": 36,
+                "Advanced": 61,
+                "Elite": 85,
+            },
+            125: {
+                "Beginner": -7,
+                "Novice": 13,
+                "Intermediate": 36,
+                "Advanced": 61,
+                "Elite": 86,
+            },
+            130: {
+                "Beginner": -8,
+                "Novice": 13,
+                "Intermediate": 36,
+                "Advanced": 61,
+                "Elite": 86,
+            },
+            135: {
+                "Beginner": -9,
+                "Novice": 12,
+                "Intermediate": 35,
+                "Advanced": 60,
+                "Elite": 86,
+            },
+            140: {
+                "Beginner": -10,
+                "Novice": 11,
+                "Intermediate": 35,
+                "Advanced": 60,
+                "Elite": 86,
+            },
+        },
+        "female_weighted": {
+            40: {
+                "Beginner": -14,
+                "Novice": -5,
+                "Intermediate": 6,
+                "Advanced": 17,
+                "Elite": 30,
+            },
+            45: {
+                "Beginner": -14,
+                "Novice": -5,
+                "Intermediate": 7,
+                "Advanced": 19,
+                "Elite": 33,
+            },
+            50: {
+                "Beginner": -14,
+                "Novice": -4,
+                "Intermediate": 8,
+                "Advanced": 21,
+                "Elite": 35,
+            },
+            55: {
+                "Beginner": -15,
+                "Novice": -4,
+                "Intermediate": 8,
+                "Advanced": 22,
+                "Elite": 37,
+            },
+            60: {
+                "Beginner": -16,
+                "Novice": -4,
+                "Intermediate": 9,
+                "Advanced": 23,
+                "Elite": 38,
+            },
+            65: {
+                "Beginner": -16,
+                "Novice": -5,
+                "Intermediate": 9,
+                "Advanced": 24,
+                "Elite": 39,
+            },
+            70: {
+                "Beginner": -18,
+                "Novice": -5,
+                "Intermediate": 9,
+                "Advanced": 24,
+                "Elite": 40,
+            },
+            75: {
+                "Beginner": -19,
+                "Novice": -6,
+                "Intermediate": 8,
+                "Advanced": 24,
+                "Elite": 41,
+            },
+            80: {
+                "Beginner": -20,
+                "Novice": -7,
+                "Intermediate": 8,
+                "Advanced": 24,
+                "Elite": 41,
+            },
+            85: {
+                "Beginner": -21,
+                "Novice": -8,
+                "Intermediate": 7,
+                "Advanced": 24,
+                "Elite": 41,
+            },
+            90: {
+                "Beginner": -23,
+                "Novice": -9,
+                "Intermediate": 7,
+                "Advanced": 24,
+                "Elite": 41,
+            },
+            95: {
+                "Beginner": -24,
+                "Novice": -10,
+                "Intermediate": 6,
+                "Advanced": 23,
+                "Elite": 41,
+            },
+            100: {
+                "Beginner": -26,
+                "Novice": -12,
+                "Intermediate": 5,
+                "Advanced": 22,
+                "Elite": 40,
+            },
+            105: {
+                "Beginner": -28,
+                "Novice": -13,
+                "Intermediate": 3,
+                "Advanced": 21,
+                "Elite": 40,
+            },
+            110: {
+                "Beginner": -30,
+                "Novice": -15,
+                "Intermediate": 2,
+                "Advanced": 20,
+                "Elite": 39,
+            },
+            115: {
+                "Beginner": -32,
+                "Novice": -17,
+                "Intermediate": 1,
+                "Advanced": 19,
+                "Elite": 38,
+            },
+            120: {
+                "Beginner": -34,
+                "Novice": -18,
+                "Intermediate": -1,
+                "Advanced": 18,
+                "Elite": 37,
             },
         },
     },
