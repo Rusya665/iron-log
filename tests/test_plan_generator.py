@@ -368,6 +368,52 @@ USER_DATA = {
         finally:
             shutil.rmtree(temp_dir)
 
+    def test_build_pre_deload_baseline_micro_plate_step(self) -> None:
+        """
+        Verify build_pre_deload_baseline honors fractional 1.0 kg plate rounding when step_kg=1.0.
+
+        :return: None
+        """
+        temp_dir = tempfile.mkdtemp()
+        sessions_file = os.path.join(temp_dir, "sessions.py")
+        sample_code = """
+from core.models import Log
+
+day = "day"
+bench_press = "bench-press"
+shoulder_press = "shoulder-press"
+
+USER_DATA = {
+    "2026-10-15": {  # Day 3
+        day: 3,
+        bench_press: Log([4, 4, 4], [97.5, 97.5, 97.5]),
+        shoulder_press: Log([5, 5, 5], [57.5, 57.5, 57.5]),
+    },
+    "2026-10-22": {  # Day 3
+        day: 3,
+        bench_press: Log([3, 3, 3], [67.5, 67.5, 67.5]),  # deload
+        shoulder_press: Log([3, 3, 3], [40, 40, 40]),  # deload
+    },
+}
+"""
+        try:
+            with open(sessions_file, "w", encoding="utf-8") as f:
+                f.write(sample_code)
+
+            # 97.5 * 0.90 = 87.75 -> 88.0 with 1.0 kg plates vs 87.5 with 2.5 kg plates
+            # 57.5 * 0.90 = 51.75 -> 52.0 with 1.0 kg plates vs 52.5 with 2.5 kg plates
+            reload_micro = build_pre_deload_baseline(sessions_file, [3], 90.0, step_kg=1.0)
+            micro_map = {e.var_name: e.mass for e in reload_micro[0].exercises}
+            self.assertEqual(micro_map["bench_press"], "88")
+            self.assertEqual(micro_map["shoulder_press"], "52")
+
+            reload_std = build_pre_deload_baseline(sessions_file, [3], 90.0, step_kg=2.5)
+            std_map = {e.var_name: e.mass for e in reload_std[0].exercises}
+            self.assertEqual(std_map["bench_press"], "87.5")
+            self.assertEqual(std_map["shoulder_press"], "52.5")
+        finally:
+            shutil.rmtree(temp_dir)
+
 
 if __name__ == "__main__":
     unittest.main()

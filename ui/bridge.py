@@ -835,13 +835,17 @@ class WebViewBridgeApi:
             return {"success": False, "error": str(e)}
 
     def restore_pre_deload(
-        self, day_numbers: Optional[List[int]] = None, scale_pct: float = 100.0
+        self,
+        day_numbers: Optional[List[int]] = None,
+        scale_pct: float = 100.0,
+        step_kg: float = 2.5,
     ) -> Dict[str, Any]:
         """
         Restore training plan baseline from last clean non-deload cycle scaled by a percentage.
 
         :param day_numbers: Optional list of cycle day numbers to restore.
         :param scale_pct: Target scaling percentage applied to mass (default: 100.0).
+        :param step_kg: Plate increment step in kg for rounding (default: 2.5).
         :return: Dictionary containing restored planned sessions or error message.
         """
         p = self.manager.get_active_profile()
@@ -862,7 +866,7 @@ class WebViewBridgeApi:
         try:
             from core.plan_generator import build_pre_deload_baseline
 
-            planned = build_pre_deload_baseline(file_path, day_numbers, scale_pct)
+            planned = build_pre_deload_baseline(file_path, day_numbers, scale_pct, step_kg=step_kg)
             total_exercises = sum(len(ps.exercises) for ps in planned)
             if total_exercises == 0:
                 return {

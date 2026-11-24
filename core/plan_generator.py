@@ -476,10 +476,28 @@ def _is_deload_block(block_lines: List[str]) -> bool:
     return any(_DELOAD_COMMENT_RE.search(ln) for ln in block_lines)
 
 
+def _round_to_plate(mass_kg: float, step_kg: float = 2.5) -> float:
+    """
+    Round a positive mass to the nearest available plate increment (e.g. 2.5 or 1.0 kg).
+
+    :param mass_kg: Target scaled mass in kilograms.
+    :param step_kg: Minimum weight jump supported by the user's plates.
+    :return: Rounded mass in kilograms (0.0 preserved for bodyweight exercises).
+    """
+    if mass_kg <= 0:
+        return 0.0
+    step = step_kg if step_kg > 0 else 2.5
+    scaled = round(mass_kg / step) * step
+    if scaled == 0:
+        scaled = round(mass_kg * 2) / 2
+    return round(scaled, 2)
+
+
 def build_pre_deload_baseline(
     sessions_file_path: str,
     day_numbers: List[int],
     scale_pct: float,
+    step_kg: float = 2.5,
 ) -> List[PlannedSession]:
     """
     Construct PlannedSession instances from the most recent non-deload cycle scaled by a percentage.
@@ -487,6 +505,7 @@ def build_pre_deload_baseline(
     :param sessions_file_path: Path to sessions.py file.
     :param day_numbers: Day numbers to plan (e.g. [1, 2, 3]).
     :param scale_pct: Target percentage of previous max mass (e.g. 85.0).
+    :param step_kg: Plate increment step in kg for rounding (default: 2.5; e.g. 1.0 for 0.5 kg fractional plates).
     :return: List of PlannedSession objects scaled to target intensity.
     """
     from core.standards import EXERCISE_STANDARDS
@@ -593,9 +612,9 @@ def build_pre_deload_baseline(
         )
         resolved_items = _resolve_alternating_items(day_histories.get(dn, []))
         for _, var_name, display, reps_list, mass_list in resolved_items:
-            # Scale + round to nearest 2.5 kg (keep 0 as 0)
+            # Scale + round to nearest available plate increment (keep 0 as 0)
             scaled_mass = [
-                round(m * factor / 2.5) * 2.5 if m > 0 else 0.0
+                _round_to_plate(m * factor, step_kg) if m > 0 else 0.0
                 for m in mass_list
             ]
             prog = _suggest_progression(reps_list, scaled_mass)
